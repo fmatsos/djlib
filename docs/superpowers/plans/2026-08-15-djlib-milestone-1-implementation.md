@@ -937,33 +937,33 @@ git commit -m "feat: classify duplicates and select preferred masters"
 - `CatalogService.merge_tracks(source_public_id, target_public_id)`
 - `CatalogService.split_track(source_public_id, file_public_ids) -> Track`
 
-- [ ] **Step 1: Write override-rescan test**
+- [x] **Step 1: Write override-rescan test**
 
 Create a human artist override, modify source metadata, rescan, assert effective artist remains override while new raw/resolved source values remain visible.
 
-- [ ] **Step 2: Write immutable merge test**
+- [x] **Step 2: Write immutable merge test**
 
 Source becomes `MERGED`, target remains ACTIVE, public IDs remain unchanged, no ID reuse, MERGE identity event exists.
 
-- [ ] **Step 3: Write split test**
+- [x] **Step 3: Write split test**
 
 Move selected file relationship to a newly created public track ID, retain original ID for remaining files, create SPLIT identity event.
 
-- [ ] **Step 4: Verify failures**
+- [x] **Step 4: Verify failures**
 
 ```bash
 pytest tests/integration/test_track_curation.py -v
 ```
 
-- [ ] **Step 5: Implement append-only override semantics**
+- [x] **Step 5: Implement append-only override semantics**
 
 Supersede previous active override with `superseded_at`; never delete historical override rows.
 
-- [ ] **Step 6: Implement transactional merge/split**
+- [x] **Step 6: Implement transactional merge/split**
 
 Track statuses, relationships, preferred-file adjustment and `TrackIdentityEvent` are committed atomically.
 
-- [ ] **Step 7: Run tests and commit**
+- [x] **Step 7: Run tests and commit**
 
 ```bash
 pytest tests/integration/test_track_curation.py -v
