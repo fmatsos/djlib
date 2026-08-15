@@ -826,7 +826,7 @@ git commit -m "feat: add targeted duplicate quality analysis"
 - `PreferredFileSelector.choose(files) -> PreferredChoice`
 - `DuplicateService.detect()`, `.analyze()`, `.run()`, `.stats()`
 
-- [ ] **Step 1: Write classifier tests**
+- [x] **Step 1: Write classifier tests**
 
 Expected outcomes:
 
@@ -840,7 +840,7 @@ high fingerprint + explicit version conflict => CONFLICT
 
 Inject threshold config into tests; do not embed magic numbers in classifier tests.
 
-- [ ] **Step 2: Write non-transitive group test**
+- [x] **Step 2: Write non-transitive group test**
 
 ```text
 A-B AUDIO_EQUIVALENT
@@ -850,21 +850,21 @@ A-C DIFFERENT
 
 must produce `REVIEW_REQUIRED`, never naive auto-confirmation.
 
-- [ ] **Step 3: Write preferred-master tests**
+- [x] **Step 3: Write preferred-master tests**
 
 Cover clean lossless vs MP3, suspicious lossless vs clean MP3, metadata tie-break, and historical value being unable to override a clear technical loss.
 
-- [ ] **Step 4: Write automatic-consolidation integration test**
+- [x] **Step 4: Write automatic-consolidation integration test**
 
 Two provisional tracks with exact duplicate bytes become one ACTIVE track plus one MERGED track; both files become active members of the surviving track; no source path/content changes.
 
-- [ ] **Step 5: Verify failures**
+- [x] **Step 5: Verify failures**
 
 ```bash
 pytest tests/unit/test_classifier.py tests/unit/test_group_builder.py tests/unit/test_preferred.py tests/integration/test_duplicate_pipeline.py -v
 ```
 
-- [ ] **Step 6: Add explicit initial thresholds to config**
+- [x] **Step 6: Add explicit initial thresholds to config**
 
 ```toml
 [duplicates.duration]
@@ -879,7 +879,7 @@ review_floor = 0.93
 
 These are starting values subject to real-library calibration, not immutable truth.
 
-- [ ] **Step 7: Implement classifier order**
+- [x] **Step 7: Implement classifier order**
 
 ```text
 binary-equal => EXACT
@@ -889,22 +889,22 @@ plausible/intermediate => PROBABLE
 otherwise => DIFFERENT
 ```
 
-- [ ] **Step 8: Implement graph-aware grouping**
+- [x] **Step 8: Implement graph-aware grouping**
 
 Auto-confirm only mutually consistent connected components. Any contradictory pair makes the group `REVIEW_REQUIRED`.
 
-- [ ] **Step 9: Implement preferred choice**
+- [x] **Step 9: Implement preferred choice**
 
 Return explicit reasons and separate `audio_quality_score`, `metadata_quality_score`, future-compatible `historical_value`. Ordered priority: integrity → audio quality → no suspicious transcode → genuine lossless → useful resolution → clipping/anomalies → metadata → history tie-break.
 
-- [ ] **Step 10: Implement duplicate service**
+- [x] **Step 10: Implement duplicate service**
 
 `detect`: candidates/groups.  
 `analyze`: BLAKE3 → conditional Chromaprint → quality → classification → preferred proposal.  
 `run`: detect + analyze + safe auto-consolidation.  
 `stats`: counts by group/pair status.
 
-- [ ] **Step 11: Add CLI commands**
+- [x] **Step 11: Add CLI commands**
 
 ```text
 djlib duplicates detect
@@ -915,7 +915,7 @@ djlib duplicates stats
 
 `duplicates run` does not generate HTML.
 
-- [ ] **Step 12: Run tests and commit**
+- [x] **Step 12: Run tests and commit**
 
 ```bash
 pytest tests/unit/test_classifier.py tests/unit/test_group_builder.py tests/unit/test_preferred.py tests/integration/test_duplicate_pipeline.py -v

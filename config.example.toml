@@ -8,15 +8,16 @@
 music_root = "/music"
 data_root = "/data"
 
-# The sections below are reserved for duplicate-detection thresholds
-# introduced in a later milestone-1 task (see Task 10 of the implementation
-# plan). They are not read by djlib yet.
-#
-# [duplicates.duration]
-# short_ms = 2000
-# medium_ms = 3000
-# long_ms = 5000
-#
-# [duplicates.chromaprint]
-# auto_equivalent = 0.985
-# review_floor = 0.93
+# Duplicate-detection thresholds, wired up in Task 10 of the implementation
+# plan (`djlib.config.DjlibConfig.duplicates`). These are starting values
+# subject to real-library calibration (`djlib duplicates calibrate`), not
+# immutable truth -- see design §14 and §18.
+
+[duplicates.duration]
+short_ms = 2000
+medium_ms = 3000
+long_ms = 5000
+
+[duplicates.chromaprint]
+auto_equivalent = 0.985
+review_floor = 0.93

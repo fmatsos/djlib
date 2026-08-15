@@ -23,6 +23,7 @@ from djlib.duplicates.calibration import (
 )
 from djlib.duplicates.chromaprint import ChromaprintService
 from djlib.duplicates.hashing import HashService
+from djlib.duplicates.service import DuplicateService
 from djlib.metadata.types import SubprocessCommandRunner
 from djlib.scan.service import ScanService
 
@@ -97,6 +98,64 @@ def duplicates_calibrate(
             write_calibration_csv(rows, sys.stdout)
 
     typer.echo(f'calibrate: pairs={len(rows)}', err=True)
+
+
+@duplicates_app.command('detect')
+def duplicates_detect() -> None:
+    """Conservative metadata blocking only (design §14) -- no BLAKE3, no
+    Chromaprint, no quality analysis. Persists `DETECTED` duplicate groups.
+    """
+    config = _load_config()
+    engine = create_engine_for_config(config)
+    with session_factory(engine)() as session:
+        groups = DuplicateService(config, session).detect()
+    typer.echo(f'detect: groups={groups}')
+
+
+@duplicates_app.command('analyze')
+def duplicates_analyze() -> None:
+    """Targeted BLAKE3/Chromaprint/quality evidence, classification and
+    preferred-file proposal for already-detected groups (design §17-21).
+    Never touches CONFIRMED/REJECTED/DEFERRED (human-decided) groups.
+    """
+    config = _load_config()
+    engine = create_engine_for_config(config)
+    with session_factory(engine)() as session:
+        groups = DuplicateService(config, session).analyze()
+    typer.echo(f'analyze: groups_analyzed={groups}')
+
+
+@duplicates_app.command('run')
+def duplicates_run() -> None:
+    """detect + analyze + safe automatic consolidation of AUTO_CONFIRMED
+    groups only. Does not generate an HTML report (see `duplicates report`,
+    a later task).
+    """
+    config = _load_config()
+    engine = create_engine_for_config(config)
+    with session_factory(engine)() as session:
+        summary = DuplicateService(config, session).run()
+    typer.echo(
+        f'run: detected={summary.groups_detected} analyzed={summary.groups_analyzed} '
+        f'consolidated={summary.groups_consolidated}'
+    )
+
+
+@duplicates_app.command('stats')
+def duplicates_stats() -> None:
+    """Counts of duplicate groups by status and pairwise evidence by classification."""
+    config = _load_config()
+    engine = create_engine_for_config(config)
+    with session_factory(engine)() as session:
+        stats = DuplicateService(config, session).stats()
+    group_line = ' '.join(
+        f'{name.lower()}={count}' for name, count in stats.group_status_counts.items()
+    )
+    pair_line = ' '.join(
+        f'{name.lower()}={count}' for name, count in stats.pair_classification_counts.items()
+    )
+    typer.echo(f'groups: {group_line}')
+    typer.echo(f'pairs: {pair_line}')
 
 
 @catalog_app.command('stats')
