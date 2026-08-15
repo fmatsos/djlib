@@ -1,20 +1,38 @@
+import datetime as dt
 import uuid
 from dataclasses import dataclass
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from djlib.db.enums import DecisionSource, IdentityEventType, RelationshipType, TrackStatus
+from djlib.db.enums import (
+    DecisionSource,
+    DuplicateStatus,
+    IdentityEventType,
+    RelationshipType,
+    TrackStatus,
+)
 from djlib.db.models import (
+    DuplicateGroup,
+    DuplicateGroupMember,
     FileFeaturedArtist,
     FileRecord,
     Track,
     TrackFeaturedArtist,
     TrackFile,
     TrackIdentityEvent,
+    TrackOverride,
 )
 from djlib.ids import new_public_id
 from djlib.resolve.normalizer import normalize_identity
+
+# The only fields Task 11 human overrides cover (design §11): the track-level
+# semantic identity fields also copied by `_copy_identity_from_file`.
+_OVERRIDABLE_FIELDS = frozenset({'artist', 'title', 'version', 'edition'})
+
+
+def _now() -> dt.datetime:
+    return dt.datetime.now(dt.UTC).replace(tzinfo=None)
 
 
 @dataclass(frozen=True)
@@ -65,21 +83,60 @@ class CatalogService:
         self._session.flush()
 
     def effective_identity(self, track: Track) -> EffectiveIdentity:
+        overrides = self._active_overrides(track.id)
         featured_artists = self._session.execute(
             select(TrackFeaturedArtist)
             .where(TrackFeaturedArtist.track_id == track.id)
             .order_by(TrackFeaturedArtist.position)
         ).scalars()
         return EffectiveIdentity(
-            artist=track.artist,
-            title=track.title,
-            version=track.version,
-            edition=track.edition,
+            artist=overrides.get('artist', track.artist),
+            title=overrides.get('title', track.title),
+            version=overrides.get('version', track.version),
+            edition=overrides.get('edition', track.edition),
             featured_artists=tuple(
                 EffectiveFeaturedArtist(position=fa.position, name=fa.name, source=fa.source)
                 for fa in featured_artists
             ),
         )
+
+    def _active_overrides(self, track_id: int) -> dict[str, str | None]:
+        rows = self._session.execute(
+            select(TrackOverride).where(
+                TrackOverride.track_id == track_id, TrackOverride.superseded_at.is_(None)
+            )
+        ).scalars()
+        return {row.field: row.value_json.get('value') for row in rows}
+
+    def set_override(self, track_public_id: str, field: str, value: str | None) -> TrackOverride:
+        """Record a human semantic correction (design §11: EFFECTIVE layer).
+
+        Append-only: any existing active override for this `(track, field)`
+        is superseded (`superseded_at` set), never deleted or updated in
+        place, per `.claude/rules/curation-persistence.md`. `effective_identity`
+        prefers the newly-active row over the track's own RESOLVED column;
+        `refresh_track_identity` on a later rescan keeps updating that
+        RESOLVED column underneath but never touches `track_overrides`, so
+        the override survives rescans untouched (design §11).
+        """
+        if field not in _OVERRIDABLE_FIELDS:
+            raise ValueError(f'unsupported override field: {field!r}')
+        track = self._require_track(track_public_id)
+
+        existing = self._session.execute(
+            select(TrackOverride).where(
+                TrackOverride.track_id == track.id,
+                TrackOverride.field == field,
+                TrackOverride.superseded_at.is_(None),
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            existing.superseded_at = _now()
+
+        override = TrackOverride(track_id=track.id, field=field, value_json={'value': value})
+        self._session.add(override)
+        self._session.flush()
+        return override
 
     def merge_track_into(
         self,
@@ -139,6 +196,194 @@ class CatalogService:
         if preferred_file_id is not None:
             track.preferred_file_id = preferred_file_id
         self._session.flush()
+
+    def merge_tracks(self, source_public_id: str, target_public_id: str) -> TrackIdentityEvent:
+        """Human-triggered MERGE (design §13): thin wrapper over `merge_track_into`.
+
+        Delegates all state mutation to the one shared merge primitive so
+        there is exactly one code path to reason about; the only difference
+        from Task 10's automatic consolidation is `decision_source=HUMAN`
+        and that there is no pairwise evidence to pick a per-file
+        relationship from -- `AUDIO_EQUIVALENT` is used as the conservative
+        default for every migrated file (a human merge asserts "these are
+        the same audio version", not "byte-identical", so `EXACT_DUPLICATE`
+        would overclaim and `PROBABLE` would underclaim).
+        """
+        if source_public_id == target_public_id:
+            raise ValueError('cannot merge a track into itself')
+        source = self._require_track(source_public_id)
+        target = self._require_track(target_public_id)
+
+        if target.status != TrackStatus.ACTIVE:
+            self.activate_track(target)
+
+        relationships = {
+            link.file_id: RelationshipType.AUDIO_EQUIVALENT
+            for link in self._session.execute(
+                select(TrackFile).where(
+                    TrackFile.track_id == source.id, TrackFile.is_active.is_(True)
+                )
+            ).scalars()
+        }
+        return self.merge_track_into(
+            survivor=target,
+            absorbed=source,
+            relationships=relationships,
+            decision_source=DecisionSource.HUMAN,
+        )
+
+    def split_track(self, source_public_id: str, file_public_ids: list[str]) -> Track:
+        """Human-triggered SPLIT (design §13): move `file_public_ids` off
+        `source_public_id` onto a brand-new track with a fresh `public_id`
+        (never reused). `source_public_id` keeps its original identity for
+        whatever files remain active on it.
+
+        The new track's identity is copied from the split-off file's own
+        already-resolved metadata (`_copy_identity_from_file`, keyed on the
+        first named file when more than one moves together) -- never from
+        `source`'s shared identity, since the entire point of a split is
+        that the moved file(s) represent a genuinely distinct identity.
+        Every moved file becomes `PRIMARY` on the new track (it is now that
+        track's own file, exactly like a freshly-scanned file's first
+        link). The new track is promoted straight to `ACTIVE` with the
+        split-off file as its preferred file -- a human just made an
+        explicit, high-confidence identity decision, so there is nothing
+        left for the automatic dedup pipeline to review, unlike a plain
+        scan's brand-new `PROVISIONAL` track.
+
+        Also rejects any pre-existing `DuplicateGroup` that still spans a
+        moved file and a file remaining on `source` (see
+        `_reject_groups_spanning_the_split`) -- otherwise a later
+        `duplicates run` could reclassify that group from current evidence
+        alone, with no memory of this split, and silently re-merge exactly
+        what the human just separated.
+        """
+        if not file_public_ids:
+            raise ValueError('split_track requires at least one file_public_id')
+        source = self._require_track(source_public_id)
+        files = self._require_files(file_public_ids)
+
+        new_track = Track(public_id=new_public_id('trk'), status=TrackStatus.PROVISIONAL)
+        self._session.add(new_track)
+        self._session.flush()
+        self._copy_identity_from_file(new_track, files[0])
+
+        moved_file_ids = {file.id for file in files}
+        links = list(
+            self._session.execute(
+                select(TrackFile).where(
+                    TrackFile.track_id == source.id,
+                    TrackFile.file_id.in_(moved_file_ids),
+                    TrackFile.is_active.is_(True),
+                )
+            ).scalars()
+        )
+        if len(links) != len(files):
+            raise RuntimeError(
+                f'{source_public_id!r} does not actively own every file in {file_public_ids!r}'
+            )
+        for link in links:
+            link.track_id = new_track.id
+            link.relationship = RelationshipType.PRIMARY
+            link.decision_source = DecisionSource.HUMAN
+
+        self._reject_groups_spanning_the_split(source.id, moved_file_ids)
+
+        self.activate_track(new_track, preferred_file_id=files[0].id)
+
+        event = TrackIdentityEvent(
+            event_uuid=str(uuid.uuid4()),
+            event_type=IdentityEventType.SPLIT,
+            source_track_public_id=source.public_id,
+            target_track_public_id=new_track.public_id,
+            payload_json={
+                'decision_source': DecisionSource.HUMAN.value,
+                'moved_file_public_ids': [file.public_id for file in files],
+            },
+        )
+        self._session.add(event)
+        self._session.flush()
+        return new_track
+
+    def _reject_groups_spanning_the_split(
+        self, source_track_id: int, moved_file_ids: set[int]
+    ) -> None:
+        """Prevent a later automatic `duplicates run` from silently re-merging
+        exactly what a human just split apart (design §13: human MERGE/SPLIT
+        decisions are stronger than automatic analysis; `curation-persistence.md`:
+        a conflicting rescan never clobbers curation).
+
+        `DuplicateGroup`/`DuplicatePairEvidence` carry no memory of a split --
+        `Track`/`TrackFile` are the only things this method changed. Without
+        this, a moved file and a file still on `source_track_id` that were
+        ever blocked together as duplicate candidates could still share a
+        `DETECTED`/`AUTO_CONFIRMED`/`REVIEW_REQUIRED` group; a later
+        `duplicates analyze`/`run` would reclassify that group from current
+        evidence alone (with no idea a human just separated these tracks) and
+        could reconfirm + auto-consolidate it right back together.
+
+        The fix reuses `DuplicateService`'s own guard rather than inventing a
+        new one: `DuplicateStatus.REJECTED` is already excluded from
+        `_ANALYZABLE_STATUSES` (Task 10), so a group spanning the split is
+        moved to `REJECTED` here and permanently skipped by future automatic
+        analysis. Only a group containing files on BOTH sides of the split is
+        touched -- a moved file's unrelated membership in some other group
+        (a coincidental duplicate of a third, uninvolved track) is left alone.
+        """
+        remaining_file_ids = set(
+            self._session.execute(
+                select(TrackFile.file_id).where(
+                    TrackFile.track_id == source_track_id, TrackFile.is_active.is_(True)
+                )
+            ).scalars()
+        )
+        if not remaining_file_ids:
+            return
+
+        moved_group_ids = set(
+            self._session.execute(
+                select(DuplicateGroupMember.group_id).where(
+                    DuplicateGroupMember.file_id.in_(moved_file_ids)
+                )
+            ).scalars()
+        )
+        for group_id in moved_group_ids:
+            member_file_ids = set(
+                self._session.execute(
+                    select(DuplicateGroupMember.file_id).where(
+                        DuplicateGroupMember.group_id == group_id
+                    )
+                ).scalars()
+            )
+            if member_file_ids & remaining_file_ids:
+                group = self._session.get(DuplicateGroup, group_id)
+                if group is not None and group.status not in (
+                    DuplicateStatus.REJECTED,
+                    DuplicateStatus.CONFIRMED,
+                    DuplicateStatus.DEFERRED,
+                ):
+                    group.status = DuplicateStatus.REJECTED
+                    group.resolved_at = _now()
+
+    def _require_track(self, public_id: str) -> Track:
+        track = self._session.execute(
+            select(Track).where(Track.public_id == public_id)
+        ).scalar_one_or_none()
+        if track is None:
+            raise RuntimeError(f'no track with public_id {public_id!r}')
+        return track
+
+    def _require_files(self, public_ids: list[str]) -> list[FileRecord]:
+        files = list(
+            self._session.execute(
+                select(FileRecord).where(FileRecord.public_id.in_(public_ids))
+            ).scalars()
+        )
+        by_public_id = {file.public_id: file for file in files}
+        missing = [public_id for public_id in public_ids if public_id not in by_public_id]
+        if missing:
+            raise RuntimeError(f'no file(s) with public_id(s) {missing!r}')
+        return [by_public_id[public_id] for public_id in public_ids]
 
     def _copy_identity_from_file(self, track: Track, file: FileRecord) -> None:
         track.artist = file.resolved_artist
