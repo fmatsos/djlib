@@ -766,7 +766,7 @@ git commit -m "feat: add targeted hash and chromaprint evidence"
 - `QualityAnalyzer.analyze(path: Path, file: FileRecord) -> QualityResult`
 - Persists versioned `FileQualityAnalysis` rows.
 
-- [ ] **Step 1: Write scoring-order tests**
+- [x] **Step 1: Write scoring-order tests**
 
 Assert:
 - corrupt < valid,
@@ -774,13 +774,13 @@ Assert:
 - HIGH transcode suspicion strongly penalizes a nominally lossless file,
 - metadata completeness breaks close ties but cannot compensate for a large audio deficit.
 
-- [ ] **Step 2: Verify failures**
+- [x] **Step 2: Verify failures**
 
 ```bash
 pytest tests/unit/test_quality.py -v
 ```
 
-- [ ] **Step 3: Implement integrity decode**
+- [x] **Step 3: Implement integrity decode**
 
 Use:
 
@@ -790,19 +790,19 @@ ffmpeg -v error -i <file> -f null -
 
 Non-zero decode result marks integrity failure.
 
-- [ ] **Step 4: Implement deterministic technical measurements**
+- [x] **Step 4: Implement deterministic technical measurements**
 
 Collect codec, effective bitrate, sample rate, bit depth, channels, peak/loudness and clipping indicators with ffmpeg/ffprobe. Store raw measurements in `details_json`.
 
-- [ ] **Step 5: Implement conservative transcode suspicion**
+- [x] **Step 5: Implement conservative transcode suspicion**
 
 Return only `NONE`, `LOW`, `MEDIUM`, `HIGH`; store heuristic evidence and never assert a definitive lossy origin without proof.
 
-- [ ] **Step 6: Persist versioned results and prove targeting**
+- [x] **Step 6: Persist versioned results and prove targeting**
 
 A plain `djlib scan` must not invoke quality analysis. Candidate analysis may invoke it once and reuse it while source signature/analyzer version remain current.
 
-- [ ] **Step 7: Run tests and commit**
+- [x] **Step 7: Run tests and commit**
 
 ```bash
 pytest tests/unit/test_quality.py tests/integration/test_quality_analysis.py -v
