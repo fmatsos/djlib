@@ -431,7 +431,7 @@ git commit -m "feat: add incremental filesystem scanning"
 - `MetadataExtractor.extract(path: Path) -> ExtractedMetadata`
 - `RawMetadata`, `TechnicalMetadata`, `ExtractedMetadata`
 
-- [ ] **Step 1: Write ExifTool adapter test**
+- [x] **Step 1: Write ExifTool adapter test**
 
 Mock JSON:
 
@@ -441,17 +441,17 @@ Mock JSON:
 
 Assert title/artist/BPM and complete raw JSON are preserved.
 
-- [ ] **Step 2: Write ffprobe adapter test**
+- [x] **Step 2: Write ffprobe adapter test**
 
 Mock a stream with codec `flac`, sample rate `44100`, channels `2`, bit depth `16`, duration `401.25`; assert normalized technical values.
 
-- [ ] **Step 3: Verify failures**
+- [x] **Step 3: Verify failures**
 
 ```bash
 pytest tests/unit/test_metadata_extractor.py -v
 ```
 
-- [ ] **Step 4: Implement subprocess runner abstraction**
+- [x] **Step 4: Implement subprocess runner abstraction**
 
 ```python
 class CommandRunner(Protocol):
@@ -460,7 +460,7 @@ class CommandRunner(Protocol):
 
 Production uses `subprocess.run(check=False, capture_output=True, text=True)`.
 
-- [ ] **Step 5: Implement ExifTool call**
+- [x] **Step 5: Implement ExifTool call**
 
 ```bash
 exiftool -j -n -Title -Artist -Album -AlbumArtist -Genre -BPM -InitialKey -Comment <file>
@@ -468,17 +468,17 @@ exiftool -j -n -Title -Artist -Album -AlbumArtist -Genre -BPM -InitialKey -Comme
 
 Valid JSON output remains usable even when stderr contains warnings; malformed/empty output is a per-file extraction error.
 
-- [ ] **Step 6: Implement ffprobe call**
+- [x] **Step 6: Implement ffprobe call**
 
 ```bash
 ffprobe -v error -print_format json -show_format -show_streams <file>
 ```
 
-- [ ] **Step 7: Integrate with scan**
+- [x] **Step 7: Integrate with scan**
 
 NEW/CHANGED and all files under `--full` are extracted. Per-file error sets metadata state ERROR, increments failed count and continues. Infrastructure failure remains fatal.
 
-- [ ] **Step 8: Test corrupt-file behavior**
+- [x] **Step 8: Test corrupt-file behavior**
 
 ```python
 summary = service.scan(full=True)
@@ -486,7 +486,7 @@ assert summary.status == ScanStatus.SUCCESS_WITH_ERRORS
 assert summary.files_failed == 1
 ```
 
-- [ ] **Step 9: Run tests and commit**
+- [x] **Step 9: Run tests and commit**
 
 ```bash
 pytest tests/unit/test_metadata_extractor.py tests/integration/test_scan_metadata_errors.py -v
