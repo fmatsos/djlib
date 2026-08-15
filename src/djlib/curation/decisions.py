@@ -261,6 +261,7 @@ class DecisionImporter:
     def _apply_decision(self, item: _ResolvedDecision) -> None:
         action = item.raw['decision']
         group = item.group
+        preferred_file_id: int | None = None
 
         if action == 'CONFIRM':
             preferred_file_id = group.proposed_preferred_file_id
@@ -271,8 +272,9 @@ class DecisionImporter:
             group.status = DuplicateStatus.CONFIRMED
         elif action == 'CHANGE_PREFERRED':
             assert item.preferred_file is not None
+            preferred_file_id = item.preferred_file.id
             self._duplicate_service.consolidate_group(
-                group, item.preferred_file.id, DecisionSource.HUMAN
+                group, preferred_file_id, DecisionSource.HUMAN
             )
             group.status = DuplicateStatus.CONFIRMED
         elif action == 'REJECT':
@@ -284,9 +286,36 @@ class DecisionImporter:
         else:  # pragma: no cover -- unreachable: schema restricts to these four actions
             raise DecisionImportError(f'unsupported decision {action!r}')
 
-        self._record_curation_event(item)
+        self._record_curation_event(item, preferred_file_id)
 
-    def _record_curation_event(self, item: _ResolvedDecision) -> CurationEvent:
+    def _record_curation_event(
+        self, item: _ResolvedDecision, preferred_file_id: int | None
+    ) -> CurationEvent:
+        """Records the human decision itself, with enough *path-based*
+        information (Task 15, design §25) for `curation/replay.py` to
+        re-find the same group's member files -- and, for CONFIRM/
+        CHANGE_PREFERRED, the same chosen preferred file -- after a full
+        rebuild, when neither the group's own `public_id` nor any member
+        file's `public_id` survives a fresh rescan.
+
+        `preferred_file_id` is passed in explicitly (rather than trusting
+        `item.preferred_file`, which the JSON schema only ever populates for
+        CHANGE_PREFERRED) so a CONFIRM decision's *actual* preferred file --
+        taken from the group's own `proposed_preferred_file_id` -- is
+        recorded too; previously it was silently dropped, leaving CONFIRM
+        events with no way to replay which file had been chosen.
+        """
+        preferred_file = (
+            self._session.get(FileRecord, preferred_file_id)
+            if preferred_file_id is not None
+            else None
+        )
+        member_file_ids = self._member_file_ids(item.group.id)
+        member_files = self._session.execute(
+            select(FileRecord).where(FileRecord.id.in_(member_file_ids))
+        ).scalars()
+        member_relative_paths = sorted(file.relative_path for file in member_files)
+
         next_sequence = (
             self._session.execute(select(func.max(CurationEvent.sequence))).scalar_one() or 0
         ) + 1
@@ -295,13 +324,15 @@ class DecisionImporter:
             event_uuid=str(uuid.uuid4()),
             event_type=_EVENT_TYPE_BY_DECISION[item.raw['decision']],
             track_public_id=None,
-            file_public_id=item.preferred_file.public_id if item.preferred_file else None,
+            file_public_id=preferred_file.public_id if preferred_file else None,
             payload_json={
                 'group_id': item.group.public_id,
                 'decision': item.raw['decision'],
-                'preferred_file_id': (
-                    item.preferred_file.public_id if item.preferred_file else None
+                'preferred_file_id': preferred_file.public_id if preferred_file else None,
+                'preferred_file_relative_path': (
+                    preferred_file.relative_path if preferred_file else None
                 ),
+                'member_file_relative_paths': member_relative_paths,
                 'reviewed_at': item.raw['reviewed_at'],
             },
         )

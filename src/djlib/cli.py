@@ -17,6 +17,7 @@ from djlib.catalog.service import CatalogService, EffectiveIdentity
 from djlib.config import DjlibConfig
 from djlib.curation.decisions import DecisionImportError, DecisionImporter
 from djlib.curation.journal import CurationJournal
+from djlib.curation.rebuild import RebuildError, RebuildService
 from djlib.db.engine import create_engine_for_config
 from djlib.db.models import FileRecord, OperationRun
 from djlib.db.session import session_factory
@@ -87,6 +88,39 @@ def scan(full: bool = typer.Option(False, '--full', help='Force a full rescan.')
         f'unchanged={summary.files_unchanged} missing={summary.files_missing} '
         f'failed={summary.files_failed}'
     )
+
+
+@app.command()
+def rebuild() -> None:
+    """Rebuild catalog.sqlite from music_root plus the curation journal (design §25).
+
+    Sequence: health-check music_root -> back up catalog.sqlite -> fresh
+    migrate -> full scan -> replay events.jsonl -> run doctor's invariants.
+    Aborts before touching anything if music_root is missing/misconfigured.
+    The pre-rebuild backup is retained even on success. Never modifies
+    music_root (`.claude/rules/source-read-only.md`).
+    """
+    config = _load_config()
+    try:
+        summary = RebuildService(config).rebuild()
+    except RebuildError as exc:
+        typer.echo(f'rebuild: aborted: {exc}', err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(
+        f'rebuild: backup={summary.backup_path or "-"} '
+        f'scan(seen={summary.scan_summary.files_seen} new={summary.scan_summary.files_new} '
+        f'failed={summary.scan_summary.files_failed}) '
+        f'replay(events={summary.replay_summary.events_replayed} '
+        f'overrides={summary.replay_summary.overrides_applied} '
+        f'merges={summary.replay_summary.merges_applied} '
+        f'splits={summary.replay_summary.splits_applied} '
+        f'decisions={summary.replay_summary.duplicate_decisions_applied}) '
+        f'invariants_ok={summary.invariants_ok}'
+    )
+    if not summary.invariants_ok:
+        typer.echo(f'rebuild: failed invariant checks: {list(summary.failed_checks)}', err=True)
+        raise typer.Exit(code=1)
 
 
 @app.command()
