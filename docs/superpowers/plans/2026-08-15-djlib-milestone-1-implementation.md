@@ -255,7 +255,7 @@ git commit -m "chore: bootstrap djlib project and lxc runtime"
 - `session_factory(engine: Engine)`
 - ORM models for files, tracks, scans, duplicates, quality, decisions, curation and app state.
 
-- [ ] **Step 1: Write failing SQLite-pragmas test**
+- [x] **Step 1: Write failing SQLite-pragmas test**
 
 ```python
 from sqlalchemy import text
@@ -267,18 +267,18 @@ def test_sqlite_pragmas(engine) -> None:
         assert c.execute(text('PRAGMA busy_timeout')).scalar_one() > 0
 ```
 
-- [ ] **Step 2: Verify failure**
+- [x] **Step 2: Verify failure**
 
 ```bash
 pytest tests/integration/test_database.py -v
 ```
 
-- [ ] **Step 3: Define enums**
+- [x] **Step 3: Define enums**
 
 Implement string enums for:
 `ScanStatus`, `TrackStatus`, `AnalysisStatus`, `RelationshipType`, `DecisionSource`, `DuplicateStatus`, `PairClassification`, `TranscodeSuspicion`.
 
-- [ ] **Step 4: Implement SQLite engine setup**
+- [x] **Step 4: Implement SQLite engine setup**
 
 ```python
 from sqlalchemy import create_engine, event
@@ -296,7 +296,7 @@ def create_engine_for_config(config):
     return engine
 ```
 
-- [ ] **Step 5: Implement full Milestone-1 model set**
+- [x] **Step 5: Implement full Milestone-1 model set**
 
 Create ORM models with the exact responsibilities from the approved design:
 
@@ -320,7 +320,7 @@ AppState
 
 Use JSON columns for raw metadata/evidence/payload and immutable `public_id` columns for externally referenced entities.
 
-- [ ] **Step 6: Enforce one active logical track per file**
+- [x] **Step 6: Enforce one active logical track per file**
 
 Add a partial unique index in migration:
 
@@ -330,14 +330,14 @@ ON track_files(file_id)
 WHERE is_active = 1;
 ```
 
-- [ ] **Step 7: Create/apply first migration**
+- [x] **Step 7: Create/apply first migration**
 
 ```bash
 alembic upgrade head
 pytest tests/integration/test_database.py -v
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/djlib/db alembic.ini alembic tests/integration/test_database.py
