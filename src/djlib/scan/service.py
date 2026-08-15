@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from djlib.catalog.queries import active_track_for_file
 from djlib.catalog.service import CatalogService
 from djlib.config import DjlibConfig
-from djlib.db.enums import ScanStatus
+from djlib.db.enums import AnalysisStatus, ScanStatus
 from djlib.db.models import FileFeaturedArtist, FileRecord, ScanRun
 from djlib.ids import new_public_id
 from djlib.metadata.extractor import MetadataExtractor, ensure_required_executables
@@ -92,6 +92,13 @@ class ScanService:
                     record.last_seen_at = now
                     files_unchanged += 1
                     needs_extraction = full
+                    if full:
+                        # A forced full re-extraction re-derives metadata even though the
+                        # source signature did not change -- treat it the same as a real
+                        # content change for cached analysis (design §5): the cache keyed
+                        # on (size_bytes, mtime_ns) can't tell "unchanged" apart from "we
+                        # decided to redo it anyway", so it must be invalidated explicitly.
+                        _mark_analysis_stale(record)
                 else:
                     record.size_bytes = item.size_bytes
                     record.mtime_ns = item.mtime_ns
@@ -99,6 +106,7 @@ class ScanService:
                     record.last_seen_at = now
                     files_changed += 1
                     needs_extraction = True
+                    _mark_analysis_stale(record)
 
                 resolved_this_scan = False
                 if needs_extraction:
@@ -189,6 +197,23 @@ class ScanService:
                     source=entry.source,
                 )
             )
+
+
+def _mark_analysis_stale(record: FileRecord) -> None:
+    """Invalidate cached duplicate-detection evidence for a changed/re-extracted file.
+
+    Per design §5, a changed source signature must invalidate binary hash ->
+    Chromaprint -> quality analysis in that order. There is no `analyzer_version`
+    column backing `binary_hash_status`/`chromaprint_status` (Task 8 in the
+    implementation plan): the entire caching contract for those two fields rests
+    on `ScanService` being the sole writer of `size_bytes`/`mtime_ns` and always
+    flipping status to STALE in the same transaction it changes them (or forces
+    a full re-extraction). `quality_status` has no analyzer yet (Task 9) but is
+    set here too so that analyzer inherits a correctly-invalidated cache.
+    """
+    record.binary_hash_status = AnalysisStatus.STALE
+    record.chromaprint_status = AnalysisStatus.STALE
+    record.quality_status = AnalysisStatus.STALE
 
 
 def _apply_metadata(record: FileRecord, extracted: ExtractedMetadata, now: dt.datetime) -> None:

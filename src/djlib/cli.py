@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 
 import typer
@@ -15,11 +16,21 @@ from djlib.config import DjlibConfig
 from djlib.db.engine import create_engine_for_config
 from djlib.db.models import FileRecord
 from djlib.db.session import session_factory
+from djlib.duplicates.calibration import (
+    collect_calibration_rows,
+    write_calibration_csv,
+    write_calibration_json,
+)
+from djlib.duplicates.chromaprint import ChromaprintService
+from djlib.duplicates.hashing import HashService
+from djlib.metadata.types import SubprocessCommandRunner
 from djlib.scan.service import ScanService
 
 app = typer.Typer(no_args_is_help=True, help='Local DJ-library catalogue and deduplication tool.')
 catalog_app = typer.Typer(no_args_is_help=True, help='Inspect the catalogue.')
+duplicates_app = typer.Typer(no_args_is_help=True, help='Duplicate-detection utilities.')
 app.add_typer(catalog_app, name='catalog')
+app.add_typer(duplicates_app, name='duplicates')
 
 
 @app.callback()
@@ -44,6 +55,48 @@ def scan(full: bool = typer.Option(False, '--full', help='Force a full rescan.')
         f'changed={summary.files_changed} unchanged={summary.files_unchanged} '
         f'missing={summary.files_missing} failed={summary.files_failed}'
     )
+
+
+@duplicates_app.command('calibrate')
+def duplicates_calibrate(
+    output: Path | None = typer.Option(
+        None, '--output', help='Write rows to this file instead of stdout.'
+    ),
+    as_json: bool = typer.Option(False, '--json', help='Emit JSON instead of CSV.'),
+) -> None:
+    """Export pairwise duplicate-candidate evidence for human threshold calibration.
+
+    For each conservatively-blocked candidate pair (Task 7), computes the
+    BLAKE3 binary hash of both files and -- only when the hashes differ --
+    their Chromaprint fingerprints and similarity. This command only reports:
+    it never writes `duplicate_groups`/`duplicate_pair_evidence` and never
+    rewrites any threshold or config value (design §18). A human samples this
+    output -- exact binary duplicates, same-version different encodings,
+    remixes, radio/extended edits, bootlegs, plausible false positives -- to
+    decide on Task 10's classification thresholds.
+    """
+    config = _load_config()
+    engine = create_engine_for_config(config)
+    hash_service = HashService(config.music_root)
+    chromaprint_service = ChromaprintService(config.music_root, SubprocessCommandRunner())
+
+    with session_factory(engine)() as session:
+        rows = collect_calibration_rows(session, hash_service, chromaprint_service)
+        session.commit()
+
+    if output is not None:
+        with output.open('w', newline='') as handle:
+            if as_json:
+                write_calibration_json(rows, handle)
+            else:
+                write_calibration_csv(rows, handle)
+    else:
+        if as_json:
+            write_calibration_json(rows, sys.stdout)
+        else:
+            write_calibration_csv(rows, sys.stdout)
+
+    typer.echo(f'calibrate: pairs={len(rows)}', err=True)
 
 
 @catalog_app.command('stats')
