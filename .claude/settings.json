@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/run-tests-on-change.sh\"",
+            "timeout": 120,
+            "statusMessage": "Running pytest after edit..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/guard-music-write.sh\"",
+            "timeout": 10,
+            "statusMessage": "Checking for /music writes..."
+          }
+        ]
+      }
+    ]
+  }
+}
