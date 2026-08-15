@@ -1,8 +1,10 @@
+import json
 import os
 import sys
 from pathlib import Path
 
 import typer
+from sqlalchemy import select
 
 from djlib.catalog.queries import (
     active_files_for_track,
@@ -16,8 +18,9 @@ from djlib.config import DjlibConfig
 from djlib.curation.decisions import DecisionImportError, DecisionImporter
 from djlib.curation.journal import CurationJournal
 from djlib.db.engine import create_engine_for_config
-from djlib.db.models import FileRecord
+from djlib.db.models import FileRecord, OperationRun
 from djlib.db.session import session_factory
+from djlib.doctor import Doctor
 from djlib.duplicates.calibration import (
     collect_calibration_rows,
     write_calibration_csv,
@@ -26,20 +29,32 @@ from djlib.duplicates.calibration import (
 from djlib.duplicates.chromaprint import ChromaprintService
 from djlib.duplicates.hashing import HashService
 from djlib.duplicates.service import DuplicateService
+from djlib.logging import configure_logging
 from djlib.metadata.types import SubprocessCommandRunner
 from djlib.report.generator import ReportGenerator
+from djlib.runs import operation_run
 from djlib.scan.service import ScanService
 
 app = typer.Typer(no_args_is_help=True, help='Local DJ-library catalogue and deduplication tool.')
 catalog_app = typer.Typer(no_args_is_help=True, help='Inspect the catalogue.')
 duplicates_app = typer.Typer(no_args_is_help=True, help='Duplicate-detection utilities.')
+runs_app = typer.Typer(no_args_is_help=True, help='Inspect operation runs.')
 app.add_typer(catalog_app, name='catalog')
 app.add_typer(duplicates_app, name='duplicates')
+app.add_typer(runs_app, name='runs')
 
 
 @app.callback()
-def main() -> None:
+def main(
+    verbose: int = typer.Option(
+        0, '-v', count=True, help='Increase console log verbosity (-v info, -vv debug).'
+    ),
+    log_level: str | None = typer.Option(
+        None, '--log-level', help='Explicit console log level (overrides -v/-vv).'
+    ),
+) -> None:
     """Local DJ-library catalogue and deduplication tool."""
+    configure_logging(_load_config(), verbosity=verbose, log_level=log_level)
 
 
 def _load_config() -> DjlibConfig:
@@ -52,13 +67,68 @@ def scan(full: bool = typer.Option(False, '--full', help='Force a full rescan.')
     """Scan music_root and incrementally update the catalogue."""
     config = _load_config()
     engine = create_engine_for_config(config)
-    service = ScanService(config, session_factory(engine))
-    summary = service.scan(full=full)
+    session_maker = session_factory(engine)
+    with operation_run(session_maker, 'scan', 'scan') as run:
+        service = ScanService(config, session_maker)
+        summary = service.scan(full=full)
+        run.summary = {
+            'scan_public_id': summary.public_id,
+            'status': summary.status.value,
+            'files_seen': summary.files_seen,
+            'files_new': summary.files_new,
+            'files_changed': summary.files_changed,
+            'files_unchanged': summary.files_unchanged,
+            'files_missing': summary.files_missing,
+            'files_failed': summary.files_failed,
+        }
     typer.echo(
-        f'scan {summary.public_id}: seen={summary.files_seen} new={summary.files_new} '
-        f'changed={summary.files_changed} unchanged={summary.files_unchanged} '
-        f'missing={summary.files_missing} failed={summary.files_failed}'
+        f'scan {summary.public_id} (run {run.public_id}): seen={summary.files_seen} '
+        f'new={summary.files_new} changed={summary.files_changed} '
+        f'unchanged={summary.files_unchanged} missing={summary.files_missing} '
+        f'failed={summary.files_failed}'
     )
+
+
+@app.command()
+def doctor(
+    repair_journal: bool = typer.Option(
+        False, '--repair-journal', help='Export pending curation events before reporting.'
+    ),
+) -> None:
+    """Run djlib health checks (design §27)."""
+    config = _load_config()
+    engine = create_engine_for_config(config)
+    session_maker = session_factory(engine)
+    report = Doctor(config, session_maker).run(repair_journal=repair_journal)
+    for check in report.checks:
+        typer.echo(f'[{check.status.value}] {check.name}: {check.message}')
+    if not report.ok:
+        raise typer.Exit(code=1)
+
+
+@runs_app.command('show')
+def runs_show(
+    run_id: str = typer.Argument(..., help='An operation run public ID (scan_/dup_/report_/import_...).'),
+) -> None:
+    """Show a single `OperationRun`'s command/status/timestamps/summary."""
+    config = _load_config()
+    engine = create_engine_for_config(config)
+    with session_factory(engine)() as session:
+        run = session.execute(
+            select(OperationRun).where(OperationRun.public_id == run_id)
+        ).scalar_one_or_none()
+    if run is None:
+        raise typer.BadParameter(f'no operation run with id {run_id}')
+
+    typer.echo(f'run: {run.public_id} command={run.command!r} status={run.status.value}')
+    typer.echo(
+        f'started_at={run.started_at.isoformat()} '
+        f'ended_at={run.ended_at.isoformat() if run.ended_at else "-"}'
+    )
+    if run.summary_json is not None:
+        typer.echo(f'summary: {json.dumps(run.summary_json, sort_keys=True)}')
+    if run.error_summary:
+        typer.echo(f'error: {run.error_summary}')
 
 
 @duplicates_app.command('calibrate')
@@ -110,9 +180,12 @@ def duplicates_detect() -> None:
     """
     config = _load_config()
     engine = create_engine_for_config(config)
-    with session_factory(engine)() as session:
-        groups = DuplicateService(config, session).detect()
-    typer.echo(f'detect: groups={groups}')
+    session_maker = session_factory(engine)
+    with operation_run(session_maker, 'duplicates detect', 'dup') as run:
+        with session_maker() as session:
+            groups = DuplicateService(config, session).detect()
+        run.summary = {'groups': groups}
+    typer.echo(f'detect (run {run.public_id}): groups={groups}')
 
 
 @duplicates_app.command('analyze')
@@ -123,9 +196,12 @@ def duplicates_analyze() -> None:
     """
     config = _load_config()
     engine = create_engine_for_config(config)
-    with session_factory(engine)() as session:
-        groups = DuplicateService(config, session).analyze()
-    typer.echo(f'analyze: groups_analyzed={groups}')
+    session_maker = session_factory(engine)
+    with operation_run(session_maker, 'duplicates analyze', 'dup') as run:
+        with session_maker() as session:
+            groups = DuplicateService(config, session).analyze()
+        run.summary = {'groups_analyzed': groups}
+    typer.echo(f'analyze (run {run.public_id}): groups_analyzed={groups}')
 
 
 @duplicates_app.command('run')
@@ -136,11 +212,18 @@ def duplicates_run() -> None:
     """
     config = _load_config()
     engine = create_engine_for_config(config)
-    with session_factory(engine)() as session:
-        summary = DuplicateService(config, session).run()
+    session_maker = session_factory(engine)
+    with operation_run(session_maker, 'duplicates run', 'dup') as run:
+        with session_maker() as session:
+            summary = DuplicateService(config, session).run()
+        run.summary = {
+            'groups_detected': summary.groups_detected,
+            'groups_analyzed': summary.groups_analyzed,
+            'groups_consolidated': summary.groups_consolidated,
+        }
     typer.echo(
-        f'run: detected={summary.groups_detected} analyzed={summary.groups_analyzed} '
-        f'consolidated={summary.groups_consolidated}'
+        f'run (run {run.public_id}): detected={summary.groups_detected} '
+        f'analyzed={summary.groups_analyzed} consolidated={summary.groups_consolidated}'
     )
 
 
@@ -172,9 +255,12 @@ def duplicates_report() -> None:
     """
     config = _load_config()
     engine = create_engine_for_config(config)
-    with session_factory(engine)() as session:
-        artifact = ReportGenerator(config, session).generate()
-    typer.echo(f'report: {artifact.output_dir}')
+    session_maker = session_factory(engine)
+    with operation_run(session_maker, 'duplicates report', 'report') as run:
+        with session_maker() as session:
+            artifact = ReportGenerator(config, session).generate()
+        run.summary = {'output_dir': str(artifact.output_dir), 'group_count': artifact.group_count}
+    typer.echo(f'report (run {run.public_id}): {artifact.output_dir}')
 
 
 @duplicates_app.command('import-decisions')
@@ -196,17 +282,25 @@ def duplicates_import_decisions(
     """
     config = _load_config()
     engine = create_engine_for_config(config)
-    with session_factory(engine)() as session:
-        try:
-            summary = DecisionImporter(config, session).import_file(path)
-        except DecisionImportError as exc:
-            typer.echo(f'import-decisions: rejected: {exc}', err=True)
-            raise typer.Exit(code=1) from exc
-        exported = CurationJournal(config).export_pending(session)
+    session_maker = session_factory(engine)
+    with operation_run(session_maker, 'duplicates import-decisions', 'import') as run:
+        with session_maker() as session:
+            try:
+                summary = DecisionImporter(config, session).import_file(path)
+            except DecisionImportError as exc:
+                run.error_summary = str(exc)
+                typer.echo(f'import-decisions: rejected: {exc}', err=True)
+                raise typer.Exit(code=1) from exc
+            exported = CurationJournal(config).export_pending(session)
+        run.summary = {
+            'accepted': summary.accepted,
+            'groups': list(summary.group_ids),
+            'journal_exported': exported,
+        }
 
     typer.echo(
-        f'import-decisions: accepted={summary.accepted} groups={list(summary.group_ids)} '
-        f'journal_exported={exported}'
+        f'import-decisions (run {run.public_id}): accepted={summary.accepted} '
+        f'groups={list(summary.group_ids)} journal_exported={exported}'
     )
 
 

@@ -69,3 +69,19 @@ class DecisionAction(StrEnum):
     CHANGE_PREFERRED = 'CHANGE_PREFERRED'
     REJECT = 'REJECT'
     DEFER = 'DEFER'
+
+
+class RunStatus(StrEnum):
+    """Outcome of one `OperationRun`-wrapped CLI invocation (Task 14).
+
+    Deliberately separate from `ScanStatus`: `ScanRun` already has its own
+    `files_failed` counter for "completed but some files failed" (its
+    SUCCESS_WITH_ERRORS), a per-file-failure concept that doesn't generalize
+    across `duplicates detect/analyze/run/report/import-decisions` -- for
+    those, "completed" (SUCCESS) vs. "raised" (FAILED) is all `OperationRun`
+    itself needs to know; anything richer lives in `summary_json` or the
+    command's own dedicated tables.
+    """
+
+    SUCCESS = 'SUCCESS'
+    FAILED = 'FAILED'

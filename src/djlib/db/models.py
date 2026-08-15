@@ -27,6 +27,7 @@ from djlib.db.enums import (
     IdentityEventType,
     PairClassification,
     RelationshipType,
+    RunStatus,
     ScanStatus,
     TrackStatus,
     TranscodeSuspicion,
@@ -326,6 +327,28 @@ class CurationEvent(Base):
     file_public_id: Mapped[str | None] = mapped_column(String, index=True)
     payload_json: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+
+
+class OperationRun(Base):
+    """General-purpose, cross-cutting run record for CLI observability (design
+    §26, Task 14). Complements -- never replaces -- the domain-specific run
+    tables that already exist (`ScanRun`'s files_new/changed/etc. counters):
+    this table is the one uniform row that `scan`, `duplicates
+    detect/analyze/run/report` and `duplicates import-decisions` each write
+    exactly once per invocation, success or failure, so `djlib runs show
+    <run-id>` has a single place to look regardless of which command ran.
+    """
+
+    __tablename__ = 'operation_runs'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    public_id: Mapped[str] = mapped_column(String, unique=True, index=True)
+    command: Mapped[str] = mapped_column(String)
+    status: Mapped[RunStatus] = mapped_column(SAEnum(RunStatus, native_enum=False))
+    started_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
+    ended_at: Mapped[dt.datetime | None] = mapped_column(DateTime)
+    summary_json: Mapped[dict | None] = mapped_column(JSON)
+    error_summary: Mapped[str | None] = mapped_column(Text)
 
 
 class AppState(Base):
