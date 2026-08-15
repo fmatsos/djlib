@@ -1137,11 +1137,11 @@ git commit -m "feat: import human decisions and persist curation journal"
 - CLI `runs show <run-id>`
 - `Doctor.run() -> DoctorReport`
 
-- [ ] **Step 1: Write run/logging tests**
+- [x] **Step 1: Write run/logging tests**
 
 Assert operation row timestamps/status/summary and `/data/logs/djlib.log` context contain command + run ID.
 
-- [ ] **Step 2: Write doctor tests**
+- [x] **Step 2: Write doctor tests**
 
 Cover:
 - `/music` missing or writable,
@@ -1151,25 +1151,25 @@ Cover:
 - curation sequence gap,
 - invalid preferred/membership relationships.
 
-- [ ] **Step 3: Verify failures**
+- [x] **Step 3: Verify failures**
 
 ```bash
 pytest tests/integration/test_runs.py tests/integration/test_doctor.py -v
 ```
 
-- [ ] **Step 4: Add OperationRun model/migration and logging**
+- [x] **Step 4: Add OperationRun model/migration and logging**
 
 Use rotating file logging. Support `-v`, `-vv`, `--log-level DEBUG`.
 
-- [ ] **Step 5: Implement safe read-only probe**
+- [x] **Step 5: Implement safe read-only probe**
 
 Attempt creation of a randomized, guaranteed-nonexistent probe under `/music`. Read-only/permission failure is PASS. If creation unexpectedly succeeds, immediately remove only that probe and return health FAIL. Never touch an existing media file.
 
-- [ ] **Step 6: Implement dependency and DB invariant checks**
+- [x] **Step 6: Implement dependency and DB invariant checks**
 
 Use `shutil.which` for tools and relational queries for active membership/preferred-file invariants.
 
-- [ ] **Step 7: Implement journal repair only on explicit flag**
+- [x] **Step 7: Implement journal repair only on explicit flag**
 
 ```text
 djlib doctor
@@ -1178,14 +1178,14 @@ djlib doctor --repair-journal
 
 Plain doctor reports a sequence gap; repair flag calls `CurationJournal.export_pending()`.
 
-- [ ] **Step 8: Add `runs show` and run tests**
+- [x] **Step 8: Add `runs show` and run tests**
 
 ```bash
 alembic upgrade head
 pytest tests/integration/test_runs.py tests/integration/test_doctor.py -v
 ```
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add src/djlib/logging.py src/djlib/runs.py src/djlib/doctor.py src/djlib/db/models.py src/djlib/cli.py alembic/versions/0002_operation_runs.py tests/integration
