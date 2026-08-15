@@ -290,3 +290,73 @@ def test_rebuild_reconstructs_the_curated_projection_exactly(
         rebuilt_engine.dispose()
 
     assert after_projection == before_projection
+
+
+def test_rebuild_restores_preferred_file_for_a_fully_automatic_consolidation(
+    config: DjlibConfig, engine: Engine
+) -> None:
+    """Task 16 finding: `duplicates run`'s fully-automatic consolidation path
+    (design §21's AUTO_CONFIRMED groups -- no human decision anywhere) must
+    durably record which file became preferred, or `djlib rebuild` silently
+    drops it -- violating design §32's "same preferred-file decisions"
+    rebuild guarantee for the single most common duplicate scenario of all:
+    byte-identical copies.
+    """
+    config.music_root.mkdir(parents=True)
+    # Same "Artist - Title" filename in two different subdirectories: with no
+    # tags at all, the filename parser (Task 5) is the only source of
+    # artist/title, and blocking's exact-artist tier
+    # (`blocking.py::_collect_exact_artist_tier`) requires a non-null
+    # `artist_normalized`/`title_normalized` match to consider two files
+    # candidates at all -- a bare, separator-less filename resolves to no
+    # title whatsoever and would never be blocked together.
+    original = config.music_root / 'dup' / 'a' / 'Some Artist - Song Title.wav'
+    exact_copy = config.music_root / 'dup' / 'b' / 'Some Artist - Song Title.wav'
+    _make_noise_wav(original, seed=42)
+    exact_copy.parent.mkdir(parents=True, exist_ok=True)
+    exact_copy.write_bytes(original.read_bytes())
+
+    hashes_before_curation = _hash_all(config.music_root)
+
+    session_maker = session_factory(engine)
+    ScanService(config, session_maker).scan()
+
+    with session_maker() as session:
+        DuplicateService(config, session).run()
+
+    with session_maker() as session:
+        (group,) = list(session.execute(select(DuplicateGroup)).scalars())
+        assert group.status == DuplicateStatus.AUTO_CONFIRMED
+        survivor = session.execute(
+            select(Track).where(Track.status == TrackStatus.ACTIVE)
+        ).scalar_one()
+        assert survivor.preferred_file_id is not None
+        survivor_public_id = survivor.public_id
+        preferred_relative_path = session.get(FileRecord, survivor.preferred_file_id).relative_path
+
+    with session_maker() as session:
+        exported = CurationJournal(config).export_pending(session)
+    assert exported > 0
+
+    hashes_before_rebuild = _hash_all(config.music_root)
+    assert hashes_before_rebuild == hashes_before_curation
+
+    engine.dispose()
+    summary = RebuildService(config).rebuild()
+    relevant_failed_checks = [c for c in summary.failed_checks if c != 'music_root_read_only']
+    assert relevant_failed_checks == []
+
+    assert _hash_all(config.music_root) == hashes_before_curation
+
+    rebuilt_engine = create_engine(config.database_url, future=True)
+    try:
+        rebuilt_session_maker = session_factory(rebuilt_engine)
+        with rebuilt_session_maker() as session:
+            survivor_after = session.execute(
+                select(Track).where(Track.public_id == survivor_public_id)
+            ).scalar_one()
+            assert survivor_after.preferred_file_id is not None
+            preferred_after = session.get(FileRecord, survivor_after.preferred_file_id)
+            assert preferred_after.relative_path == preferred_relative_path
+    finally:
+        rebuilt_engine.dispose()

@@ -326,9 +326,22 @@ class DuplicateService:
             if self.consolidate_group(
                 group, group.proposed_preferred_file_id, DecisionSource.AUTOMATIC
             ):
+                self._record_automatic_preferred_file_event(group.proposed_preferred_file_id)
                 consolidated += 1
         self._session.commit()
         return consolidated
+
+    def _record_automatic_preferred_file_event(self, preferred_file_id: int) -> None:
+        """No human decision produced this consolidation -- `decisions.py`'s
+        own event (the only durable record of a chosen preferred file) is
+        never written for it, so replay must be given something else to
+        restore `Track.preferred_file_id` from after a rebuild (design §32).
+        """
+        preferred_file = self._session.get(FileRecord, preferred_file_id)
+        assert preferred_file is not None
+        survivor = active_track_for_file(self._session, preferred_file_id)
+        assert survivor is not None
+        self._catalog_service.record_automatic_preferred_file(survivor, preferred_file)
 
     def consolidate_group(
         self,
