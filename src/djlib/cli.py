@@ -13,6 +13,8 @@ from djlib.catalog.queries import (
 )
 from djlib.catalog.service import CatalogService, EffectiveIdentity
 from djlib.config import DjlibConfig
+from djlib.curation.decisions import DecisionImportError, DecisionImporter
+from djlib.curation.journal import CurationJournal
 from djlib.db.engine import create_engine_for_config
 from djlib.db.models import FileRecord
 from djlib.db.session import session_factory
@@ -173,6 +175,39 @@ def duplicates_report() -> None:
     with session_factory(engine)() as session:
         artifact = ReportGenerator(config, session).generate()
     typer.echo(f'report: {artifact.output_dir}')
+
+
+@duplicates_app.command('import-decisions')
+def duplicates_import_decisions(
+    path: Path = typer.Argument(..., help='Path to an exported decisions.json file.'),
+) -> None:
+    """Atomically import a browser-exported `decisions.json` (design §24,
+    Task 13 -- a major review gate). Validates JSON Schema, schema version,
+    report ID shape, catalog revision freshness, group/file existence,
+    current group state and (for CHANGE_PREFERRED) group membership before
+    writing anything; the whole file is rejected -- with zero database
+    writes -- on the first failure. There is no `--force` in Milestone 1.
+
+    On success, applies CONFIRM/CHANGE_PREFERRED (consolidating the group)
+    and REJECT/DEFER (recording the human decision without consolidation),
+    commits, then exports any newly-committed `CurationEvent` rows to
+    `/data/curation/events.jsonl` (`CurationJournal.export_pending()`) as a
+    separate, retriable step.
+    """
+    config = _load_config()
+    engine = create_engine_for_config(config)
+    with session_factory(engine)() as session:
+        try:
+            summary = DecisionImporter(config, session).import_file(path)
+        except DecisionImportError as exc:
+            typer.echo(f'import-decisions: rejected: {exc}', err=True)
+            raise typer.Exit(code=1) from exc
+        exported = CurationJournal(config).export_pending(session)
+
+    typer.echo(
+        f'import-decisions: accepted={summary.accepted} groups={list(summary.group_ids)} '
+        f'journal_exported={exported}'
+    )
 
 
 @catalog_app.command('stats')

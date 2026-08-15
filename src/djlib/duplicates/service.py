@@ -321,15 +321,33 @@ class DuplicateService:
         )
         consolidated = 0
         for group in groups:
-            if self._consolidate_group(group):
+            if group.proposed_preferred_file_id is None:
+                continue
+            if self.consolidate_group(
+                group, group.proposed_preferred_file_id, DecisionSource.AUTOMATIC
+            ):
                 consolidated += 1
         self._session.commit()
         return consolidated
 
-    def _consolidate_group(self, group: DuplicateGroup) -> bool:
-        if group.proposed_preferred_file_id is None:
-            return False
+    def consolidate_group(
+        self,
+        group: DuplicateGroup,
+        preferred_file_id: int,
+        decision_source: DecisionSource,
+    ) -> bool:
+        """Fold every member file of `group` onto one surviving ACTIVE track,
+        with `preferred_file_id` as the chosen master (design §13/§21).
 
+        This is the one shared merge-orchestration primitive: Task 10's
+        automatic `duplicates run` (via `_consolidate_auto_confirmed_groups`,
+        `decision_source=AUTOMATIC`, `preferred_file_id` taken from the
+        group's own `proposed_preferred_file_id`) and Task 13's human
+        `CONFIRM`/`CHANGE_PREFERRED` decision import (`decision_source=HUMAN`,
+        `preferred_file_id` taken from the group's proposal or the human's
+        explicit override) both call this method rather than duplicating the
+        merge logic a second time.
+        """
         file_ids = self._member_file_ids(group.id)
         tracks_by_file: dict[int, Track | None] = {
             file_id: active_track_for_file(self._session, file_id) for file_id in file_ids
@@ -343,9 +361,9 @@ class DuplicateService:
         if len(distinct_track_ids) <= 1:
             return False  # already consolidated into one track -- idempotent no-op
 
-        if group.proposed_preferred_file_id not in tracks_by_file:
+        if preferred_file_id not in tracks_by_file:
             return False
-        survivor_track = tracks_by_file[group.proposed_preferred_file_id]
+        survivor_track = tracks_by_file[preferred_file_id]
         assert survivor_track is not None
 
         absorbed: dict[int, dict[int, RelationshipType]] = {}
@@ -353,9 +371,7 @@ class DuplicateService:
             assert track is not None
             if track.id == survivor_track.id:
                 continue
-            relationship = self._relationship_for(
-                group.id, file_id, group.proposed_preferred_file_id
-            )
+            relationship = self._relationship_for(group.id, file_id, preferred_file_id)
             absorbed.setdefault(track.id, {})[file_id] = relationship
 
         absorbed_tracks = {
@@ -366,12 +382,10 @@ class DuplicateService:
                 survivor=survivor_track,
                 absorbed=absorbed_tracks[track_id],
                 relationships=relationships,
-                decision_source=DecisionSource.AUTOMATIC,
+                decision_source=decision_source,
             )
 
-        self._catalog_service.activate_track(
-            survivor_track, preferred_file_id=group.proposed_preferred_file_id
-        )
+        self._catalog_service.activate_track(survivor_track, preferred_file_id=preferred_file_id)
         group.resolved_at = _now()
         return True
 

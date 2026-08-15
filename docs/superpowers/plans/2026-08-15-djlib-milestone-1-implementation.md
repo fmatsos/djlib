@@ -1067,21 +1067,21 @@ git commit -m "feat: generate static duplicate review reports"
 - `DecisionImporter.import_file(path: Path) -> ImportSummary`
 - `CurationJournal.export_pending() -> int`
 
-- [ ] **Step 1: Write stale-import rejection tests**
+- [x] **Step 1: Write stale-import rejection tests**
 
 Atomically reject unsupported schema, unknown report, changed catalog/group, vanished group, changed affected file signature. Assert zero partial writes.
 
-- [ ] **Step 2: Write journal-gap repair test**
+- [x] **Step 2: Write journal-gap repair test**
 
 Commit sequences 1 and 2, export only 1, call `export_pending()`, assert sequence 2 is appended exactly once.
 
-- [ ] **Step 3: Verify failures**
+- [x] **Step 3: Verify failures**
 
 ```bash
 pytest tests/integration/test_decision_import.py tests/integration/test_curation_journal.py -v
 ```
 
-- [ ] **Step 4: Implement validation before business write**
+- [x] **Step 4: Implement validation before business write**
 
 Order:
 
@@ -1097,25 +1097,25 @@ file signatures
 
 No force override.
 
-- [ ] **Step 5: Implement decision semantics**
+- [x] **Step 5: Implement decision semantics**
 
 `CONFIRM`: group CONFIRMED + proposed preferred accepted.  
 `CHANGE_PREFERRED`: CONFIRMED + human-selected preferred.  
 `REJECT`: REJECTED + durable human negative constraint preventing future silent re-merge.  
 `DEFER`: DEFERRED + identities remain separate.
 
-- [ ] **Step 6: Implement SQLite-first monotonic curation events**
+- [x] **Step 6: Implement SQLite-first monotonic curation events**
 
 Accepted actions insert committed `CurationEvent` rows in the same DB transaction. After COMMIT, append pending events to `/data/curation/events.jsonl`, then advance `last_exported_curation_sequence`.
 
-- [ ] **Step 7: Add CLI and run tests**
+- [x] **Step 7: Add CLI and run tests**
 
 ```bash
 djlib duplicates import-decisions /data/decisions/decisions.json
 pytest tests/integration/test_decision_import.py tests/integration/test_curation_journal.py -v
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/djlib/curation src/djlib/cli.py tests/integration/test_decision_import.py tests/integration/test_curation_journal.py
