@@ -25,6 +25,7 @@ from djlib.duplicates.chromaprint import ChromaprintService
 from djlib.duplicates.hashing import HashService
 from djlib.duplicates.service import DuplicateService
 from djlib.metadata.types import SubprocessCommandRunner
+from djlib.report.generator import ReportGenerator
 from djlib.scan.service import ScanService
 
 app = typer.Typer(no_args_is_help=True, help='Local DJ-library catalogue and deduplication tool.')
@@ -156,6 +157,22 @@ def duplicates_stats() -> None:
     )
     typer.echo(f'groups: {group_line}')
     typer.echo(f'pairs: {pair_line}')
+
+
+@duplicates_app.command('report')
+def duplicates_report() -> None:
+    """Generate a static, serverless HTML duplicate-review report (design
+    §22) under `/data/reports/duplicates-review-YYYYMMDD-HHMMSS/`. Read-only:
+    never mutates `duplicate_groups`/`files`/etc, and performs no persistence
+    of its own -- review decisions are made and exported entirely in the
+    browser (design §23; see `djlib duplicates import-decisions`, Task 13,
+    for applying an exported `decisions.json` back to the database).
+    """
+    config = _load_config()
+    engine = create_engine_for_config(config)
+    with session_factory(engine)() as session:
+        artifact = ReportGenerator(config, session).generate()
+    typer.echo(f'report: {artifact.output_dir}')
 
 
 @catalog_app.command('stats')

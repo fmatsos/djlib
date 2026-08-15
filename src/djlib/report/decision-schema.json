@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://djlib.local/schemas/decisions.json",
+  "title": "djlib duplicate-review decisions export (design §23)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "report_id", "catalog_revision", "generated_at", "decisions"],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "report_id": {
+      "type": "string",
+      "pattern": "^rpt_"
+    },
+    "catalog_revision": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_at": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/decision"
+      }
+    }
+  },
+  "$defs": {
+    "decision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["group_id", "decision", "reviewed_at"],
+      "properties": {
+        "group_id": {
+          "type": "string",
+          "pattern": "^dup_"
+        },
+        "decision": {
+          "type": "string",
+          "enum": ["CONFIRM", "CHANGE_PREFERRED", "REJECT", "DEFER"]
+        },
+        "preferred_file_id": {
+          "type": ["string", "null"],
+          "pattern": "^fil_"
+        },
+        "reviewed_at": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "decision": {
+                "const": "CHANGE_PREFERRED"
+              }
+            },
+            "required": ["decision"]
+          },
+          "then": {
+            "required": ["preferred_file_id"],
+            "properties": {
+              "preferred_file_id": {
+                "type": "string",
+                "pattern": "^fil_"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

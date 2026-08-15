@@ -987,7 +987,7 @@ git commit -m "feat: preserve human track curation and identity history"
 - Output `/data/reports/duplicates-review-YYYYMMDD-HHMMSS/{index.html,manifest.json}`
 - Browser export schema version 1.
 
-- [ ] **Step 1: Write JSON Schema tests**
+- [x] **Step 1: Write JSON Schema tests**
 
 Only these actions are valid:
 
@@ -1000,21 +1000,21 @@ DEFER
 
 `CHANGE_PREFERRED` requires `preferred_file_id`.
 
-- [ ] **Step 2: Write report artifact integration test**
+- [x] **Step 2: Write report artifact integration test**
 
 Seed a REVIEW_REQUIRED group and assert manifest includes report ID, catalog revision, source signatures, group evidence, quality values, proposed preferred file and reasons.
 
-- [ ] **Step 3: Verify failures**
+- [x] **Step 3: Verify failures**
 
 ```bash
 pytest tests/unit/test_decision_schema.py tests/integration/test_report_decisions.py -v
 ```
 
-- [ ] **Step 4: Implement deterministic catalog revision**
+- [x] **Step 4: Implement deterministic catalog revision**
 
 Revision combines latest completed scan public ID, latest duplicate-analysis run public ID and current max curation sequence.
 
-- [ ] **Step 5: Implement static report UI**
+- [x] **Step 5: Implement static report UI**
 
 Required:
 - filters: classification/reason, confidence, format, decision state,
@@ -1026,7 +1026,7 @@ Required:
 
 No server and no audio previews.
 
-- [ ] **Step 6: Implement reversible in-browser decisions and export**
+- [x] **Step 6: Implement reversible in-browser decisions and export**
 
 `app.js` stores page-local decisions and exports:
 
@@ -1040,14 +1040,14 @@ No server and no audio previews.
 }
 ```
 
-- [ ] **Step 7: Add CLI and run tests**
+- [x] **Step 7: Add CLI and run tests**
 
 ```bash
 djlib duplicates report
 pytest tests/unit/test_decision_schema.py tests/integration/test_report_decisions.py -v
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/djlib/report src/djlib/cli.py tests/unit/test_decision_schema.py tests/integration/test_report_decisions.py
