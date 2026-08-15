@@ -698,11 +698,11 @@ git commit -m "feat: add duplicate candidate blocking and metadata evidence"
 - `fingerprint_similarity(left, right) -> float`
 - CLI `duplicates calibrate`
 
-- [ ] **Step 1: Write exact-copy hash test and cache test**
+- [x] **Step 1: Write exact-copy hash test and cache test**
 
 Two byte-identical files must produce the same BLAKE3. Two calls with unchanged `(size,mtime_ns,analyzer_version)` invoke the hasher once.
 
-- [ ] **Step 2: Write fpcalc JSON parser/cache tests**
+- [x] **Step 2: Write fpcalc JSON parser/cache tests**
 
 Use fixture:
 
@@ -712,13 +712,13 @@ Use fixture:
 
 Assert fingerprint/duration parsing and cache invalidation after source signature changes.
 
-- [ ] **Step 3: Verify failures**
+- [x] **Step 3: Verify failures**
 
 ```bash
 pytest tests/unit/test_hashing.py tests/unit/test_chromaprint.py tests/integration/test_analysis_cache.py -v
 ```
 
-- [ ] **Step 4: Implement streaming BLAKE3**
+- [x] **Step 4: Implement streaming BLAKE3**
 
 ```python
 h = blake3()
@@ -730,7 +730,7 @@ return h.hexdigest()
 
 Only candidate analysis requests hashes.
 
-- [ ] **Step 5: Implement `fpcalc -json` adapter and cache**
+- [x] **Step 5: Implement `fpcalc -json` adapter and cache**
 
 ```bash
 fpcalc -json <file>
@@ -738,15 +738,15 @@ fpcalc -json <file>
 
 Only run when binary hashes differ and metadata/duration remain plausible.
 
-- [ ] **Step 6: Implement similarity behind one function**
+- [x] **Step 6: Implement similarity behind one function**
 
 Keep the algorithm encapsulated in `fingerprint_similarity()` so it can be replaced without changing classification code.
 
-- [ ] **Step 7: Implement calibration data export**
+- [x] **Step 7: Implement calibration data export**
 
 `djlib duplicates calibrate` emits CSV/JSON containing exact positives, likely same-version different-encoding pairs, explicit version conflicts, similarity and duration delta. It never silently rewrites thresholds.
 
-- [ ] **Step 8: Run tests and commit**
+- [x] **Step 8: Run tests and commit**
 
 ```bash
 pytest tests/unit/test_hashing.py tests/unit/test_chromaprint.py tests/integration/test_analysis_cache.py -v
