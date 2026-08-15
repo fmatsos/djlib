@@ -621,7 +621,7 @@ git commit -m "feat: create provisional tracks and catalog inspection"
 - `metadata_similarity(left, right) -> MetadataEvidence`
 - `CandidateBlocker.find_candidates(file_id: int) -> list[CandidatePair]`
 
-- [ ] **Step 1: Write duration-window tests**
+- [x] **Step 1: Write duration-window tests**
 
 ```text
 <=5 min => 2000 ms
@@ -629,7 +629,7 @@ git commit -m "feat: create provisional tracks and catalog inspection"
 >10 min => 5000 ms
 ```
 
-- [ ] **Step 2: Write anti-false-positive version tests**
+- [x] **Step 2: Write anti-false-positive version tests**
 
 Explicitly incompatible:
 
@@ -644,17 +644,17 @@ Bootleg vs Original
 
 `Original Mix` vs empty is compatible-with-penalty, not identical.
 
-- [ ] **Step 3: Write featuring-tolerance tests**
+- [x] **Step 3: Write featuring-tolerance tests**
 
 Missing feat on one side does not exclude; conflicting explicit feats reduce confidence.
 
-- [ ] **Step 4: Verify failures**
+- [x] **Step 4: Verify failures**
 
 ```bash
 pytest tests/unit/test_similarity.py tests/unit/test_blocking.py -v
 ```
 
-- [ ] **Step 5: Implement explicit evidence object**
+- [x] **Step 5: Implement explicit evidence object**
 
 ```python
 @dataclass(frozen=True)
@@ -670,11 +670,11 @@ class MetadataEvidence:
 
 Use RapidFuzz for string similarity; keep each component.
 
-- [ ] **Step 6: Implement conservative SQL blocking**
+- [x] **Step 6: Implement conservative SQL blocking**
 
 Strong path: normalized artist/title + duration. Fuzzy title path allowed. Missing artist path requires very close title+duration. Explicit incompatible versions never enter automatic merge path.
 
-- [ ] **Step 7: Run tests and commit**
+- [x] **Step 7: Run tests and commit**
 
 ```bash
 pytest tests/unit/test_similarity.py tests/unit/test_blocking.py -v
