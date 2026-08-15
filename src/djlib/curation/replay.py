@@ -58,6 +58,7 @@ from djlib.catalog.queries import active_track_for_file
 from djlib.catalog.service import (
     EVENT_TYPE_TRACK_MERGE,
     EVENT_TYPE_TRACK_OVERRIDE_SET,
+    EVENT_TYPE_TRACK_PREFERRED_FILE_AUTO_SET,
     EVENT_TYPE_TRACK_SPLIT,
     CatalogService,
 )
@@ -102,6 +103,7 @@ class ReplaySummary:
     merges_applied: int
     splits_applied: int
     duplicate_decisions_applied: int
+    automatic_preferred_file_applied: int
 
 
 def _now() -> dt.datetime:
@@ -131,7 +133,13 @@ class CurationReplay:
 
     def replay(self, path: Path) -> ReplaySummary:
         events = _read_events(path)
-        counts = {'overrides': 0, 'merges': 0, 'splits': 0, 'decisions': 0}
+        counts = {
+            'overrides': 0,
+            'merges': 0,
+            'splits': 0,
+            'decisions': 0,
+            'automatic_preferred_file': 0,
+        }
         current_event: dict | None = None
 
         try:
@@ -161,6 +169,7 @@ class CurationReplay:
             merges_applied=counts['merges'],
             splits_applied=counts['splits'],
             duplicate_decisions_applied=counts['decisions'],
+            automatic_preferred_file_applied=counts['automatic_preferred_file'],
         )
 
     # -- dispatch ----------------------------------------------------------
@@ -181,6 +190,9 @@ class CurationReplay:
         elif event_type in _DUPLICATE_DECISION_EVENT_TYPES:
             self._apply_duplicate_decision(event)
             counts['decisions'] += 1
+        elif event_type == EVENT_TYPE_TRACK_PREFERRED_FILE_AUTO_SET:
+            self._apply_automatic_preferred_file(event)
+            counts['automatic_preferred_file'] += 1
         else:
             raise ReplayError(
                 f'event {event.get("event_uuid")} (sequence {event.get("sequence")}) has '
@@ -299,6 +311,28 @@ class CurationReplay:
         new_track.public_id = payload['new_track_public_id']
         source_track.public_id = payload['source_track_public_id']
         self._session.flush()
+
+    # -- fully-automatic preferred-file selection (design §21/§32) ----------
+
+    def _apply_automatic_preferred_file(self, event: dict) -> None:
+        """The preferred file's own active track is, by construction, the
+        consolidation survivor: this event's `TRACK_MERGE` sibling(s) always
+        replay first (same journal, earlier sequence -- `duplicates run`
+        always merges before consolidating), so resolving via the preferred
+        file itself needs no separate track reference in the payload.
+        """
+        payload = event['payload']
+        preferred_file = self._file_by_relative_path(
+            payload['preferred_file_relative_path'], event
+        )
+        track = active_track_for_file(self._session, preferred_file.id)
+        if track is None:
+            raise ReplayError(
+                f'event {event["event_uuid"]}: preferred file '
+                f'{payload["preferred_file_relative_path"]!r} has no active track; '
+                'cannot restore its automatic preferred-file selection'
+            )
+        self._catalog_service.activate_track(track, preferred_file_id=preferred_file.id)
 
     # -- duplicate decision (CONFIRM / CHANGE_PREFERRED / REJECT / DEFER) --
 

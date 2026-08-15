@@ -31,13 +31,15 @@ from djlib.resolve.normalizer import normalize_identity
 # semantic identity fields also copied by `_copy_identity_from_file`.
 _OVERRIDABLE_FIELDS = frozenset({'artist', 'title', 'version', 'edition'})
 
-# `CurationEvent.event_type` string constants for the three curation-affecting
-# actions this service performs (Task 15 retrofit, design §25). Plain string
+# `CurationEvent.event_type` string constants for the curation-affecting
+# actions this service performs (Task 15 retrofit, design §25; the fourth
+# added by Task 16 -- see `record_automatic_preferred_file`). Plain string
 # literals -- `CurationEvent.event_type` is not a native enum -- but the exact
 # spellings here must match `curation/replay.py`'s dispatch table byte-for-byte.
 EVENT_TYPE_TRACK_OVERRIDE_SET = 'TRACK_OVERRIDE_SET'
 EVENT_TYPE_TRACK_MERGE = 'TRACK_MERGE'
 EVENT_TYPE_TRACK_SPLIT = 'TRACK_SPLIT'
+EVENT_TYPE_TRACK_PREFERRED_FILE_AUTO_SET = 'TRACK_PREFERRED_FILE_AUTO_SET'
 
 
 def _now() -> dt.datetime:
@@ -253,6 +255,25 @@ class CatalogService:
         if preferred_file_id is not None:
             track.preferred_file_id = preferred_file_id
         self._session.flush()
+
+    def record_automatic_preferred_file(self, track: Track, preferred_file: FileRecord) -> None:
+        """Durably records a fully-automatic preferred-file choice (design
+        §21's `AUTO_CONFIRMED` consolidation, `DuplicateService.
+        _consolidate_auto_confirmed_groups`) -- the one case where
+        `Track.preferred_file_id` gets set with no human decision anywhere,
+        and therefore no `curation/decisions.py`-recorded event to replay.
+        Without this, `djlib rebuild` restores the merge itself (via the
+        survivor's own `TRACK_MERGE` events) but silently drops which file
+        was preferred, violating design §32's "same preferred-file
+        decisions" rebuild guarantee for the most common duplicate scenario
+        of all: exact-copy files.
+        """
+        self._record_curation_event(
+            event_type=EVENT_TYPE_TRACK_PREFERRED_FILE_AUTO_SET,
+            track_public_id=track.public_id,
+            file_public_id=preferred_file.public_id,
+            payload={'preferred_file_relative_path': preferred_file.relative_path},
+        )
 
     def merge_tracks(self, source_public_id: str, target_public_id: str) -> TrackIdentityEvent:
         """Human-triggered MERGE (design §13): thin wrapper over `merge_track_into`.

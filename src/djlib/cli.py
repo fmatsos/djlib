@@ -1,10 +1,12 @@
 import json
 import os
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 import typer
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from djlib.catalog.queries import (
     active_files_for_track,
@@ -19,7 +21,17 @@ from djlib.curation.decisions import DecisionImportError, DecisionImporter
 from djlib.curation.journal import CurationJournal
 from djlib.curation.rebuild import RebuildError, RebuildService
 from djlib.db.engine import create_engine_for_config
-from djlib.db.models import FileRecord, OperationRun
+from djlib.db.enums import PairClassification
+from djlib.db.models import (
+    CurationEvent,
+    DuplicateGroup,
+    DuplicateGroupMember,
+    DuplicatePairEvidence,
+    FileQualityAnalysis,
+    FileRecord,
+    OperationRun,
+    Track,
+)
 from djlib.db.session import session_factory
 from djlib.doctor import Doctor
 from djlib.duplicates.calibration import (
@@ -29,12 +41,22 @@ from djlib.duplicates.calibration import (
 )
 from djlib.duplicates.chromaprint import ChromaprintService
 from djlib.duplicates.hashing import HashService
+from djlib.duplicates.preferred import PreferredCandidate, PreferredChoice, PreferredFileSelector
+from djlib.duplicates.quality import QualityResult
 from djlib.duplicates.service import DuplicateService
 from djlib.logging import configure_logging
 from djlib.metadata.types import SubprocessCommandRunner
 from djlib.report.generator import ReportGenerator
 from djlib.runs import operation_run
 from djlib.scan.service import ScanService
+
+# Mirrors `duplicates/groups.py::DuplicateGroupBuilder`'s own inconsistency
+# set (design Sec.16) -- kept as a small local copy here rather than importing
+# a private name across module boundaries, the same judgment call
+# `report/generator.py::_group_reasons` already made for the same reason.
+_INCONSISTENT_CLASSIFICATIONS = frozenset(
+    {PairClassification.DIFFERENT, PairClassification.CONFLICT}
+)
 
 app = typer.Typer(no_args_is_help=True, help='Local DJ-library catalogue and deduplication tool.')
 catalog_app = typer.Typer(no_args_is_help=True, help='Inspect the catalogue.')
@@ -115,7 +137,8 @@ def rebuild() -> None:
         f'overrides={summary.replay_summary.overrides_applied} '
         f'merges={summary.replay_summary.merges_applied} '
         f'splits={summary.replay_summary.splits_applied} '
-        f'decisions={summary.replay_summary.duplicate_decisions_applied}) '
+        f'decisions={summary.replay_summary.duplicate_decisions_applied} '
+        f'auto_preferred_files={summary.replay_summary.automatic_preferred_file_applied}) '
         f'invariants_ok={summary.invariants_ok}'
     )
     if not summary.invariants_ok:
@@ -376,6 +399,7 @@ def catalog_inspect(
                 typer.echo('')
                 typer.echo(f'track: {track.public_id} status={track.status.value}')
                 _print_effective_identity(CatalogService(session).effective_identity(track))
+                _print_duplicate_context(session, track)
         elif public_id.startswith('trk_'):
             track = find_track_by_public_id(session, public_id)
             if track is None:
@@ -385,6 +409,7 @@ def catalog_inspect(
             for file in active_files_for_track(session, track.id):
                 typer.echo('')
                 _print_file(file)
+            _print_duplicate_context(session, track)
         else:
             raise typer.BadParameter('public id must start with fil_ or trk_')
 
@@ -421,3 +446,156 @@ def _print_effective_identity(identity: EffectiveIdentity) -> None:
     if identity.featured_artists:
         featured = ', '.join(f'{fa.name} ({fa.source})' for fa in identity.featured_artists)
         typer.echo(f'featured artists: {featured}')
+
+
+def _quality_result_from_row(row: FileQualityAnalysis) -> QualityResult:
+    """A small local copy of `report/generator.py::_quality_result_from_row`
+    (reconstructing a `QualityResult` from an already-persisted row, so this
+    never re-invokes ffmpeg/fpcalc from a read-only inspect command) -- kept
+    as its own copy across the module boundary for the same reason that
+    module's own docstring gives for not sharing its private helpers.
+    """
+    details = row.details_json or {}
+    return QualityResult(
+        integrity_ok=row.integrity_status == 'OK',
+        lossless=row.lossless_status == 'LOSSLESS',
+        transcode_suspicion=row.transcode_suspicion,
+        clipping_detected=row.clipping_status == 'CLIPPED',
+        audio_quality_score=details.get('audio_quality_score', 0.0),
+        metadata_completeness=details.get('metadata_completeness', 0.0),
+        quality_score=row.quality_score if row.quality_score is not None else 0.0,
+        details=details,
+    )
+
+
+def _group_reasons(pair_rows: list[DuplicatePairEvidence]) -> list[str]:
+    """A small local copy of `report/generator.py::_group_reasons` (design
+    Sec.16's own group-status rationale, mirrored read-only for display)."""
+    classifications = {row.classification for row in pair_rows}
+    if classifications & _INCONSISTENT_CLASSIFICATIONS:
+        return [
+            'conflicting or contradictory pairwise evidence within this group '
+            '(design Sec.16: never rely on naive transitive closure)'
+        ]
+    if PairClassification.PROBABLE in classifications:
+        return [
+            'at least one PROBABLE pair -- plausible but not confident enough '
+            'for automatic consolidation'
+        ]
+    if classifications:
+        return ['every pairwise classification in this group is EXACT or AUDIO_EQUIVALENT']
+    return ['no pairwise evidence available (fewer than two analyzed files)']
+
+
+def _preferred_choice_among(
+    session: Session, files: Iterable[FileRecord]
+) -> PreferredChoice | None:
+    """Reconstructs preferred-file rationale from already-persisted
+    `FileQualityAnalysis` rows only -- never re-runs quality analysis from a
+    read-only inspect command (same "recomputed, not re-run" judgment call as
+    `report/generator.py`).
+    """
+    candidates: list[PreferredCandidate] = []
+    for file in files:
+        row = session.execute(
+            select(FileQualityAnalysis)
+            .where(FileQualityAnalysis.file_id == file.id)
+            .order_by(FileQualityAnalysis.id.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if row is None:
+            continue
+        candidates.append(PreferredCandidate(file_id=file.id, quality=_quality_result_from_row(row)))
+    if not candidates:
+        return None
+    return PreferredFileSelector().choose(candidates)
+
+
+def _print_duplicate_context(session: Session, track: Track) -> None:
+    """Shows duplicate relationships/evidence, preferred-file rationale and
+    human decision provenance for `track` (design Sec.33's literal `catalog
+    inspect` acceptance wording) -- entirely from already-persisted rows,
+    read-only, exactly like `duplicates report` (Task 12).
+    """
+    files = active_files_for_track(session, track.id)
+    if not files:
+        return
+    file_ids = [file.id for file in files]
+    file_public_ids = {file.public_id for file in files}
+
+    group_ids = list(
+        session.execute(
+            select(DuplicateGroupMember.group_id.distinct()).where(
+                DuplicateGroupMember.file_id.in_(file_ids)
+            )
+        ).scalars()
+    )
+    groups = (
+        list(session.execute(select(DuplicateGroup).where(DuplicateGroup.id.in_(group_ids))).scalars())
+        if group_ids
+        else []
+    )
+
+    for group in groups:
+        typer.echo('')
+        typer.echo(
+            f'duplicate group: {group.public_id} status={group.status.value} '
+            f'confidence={group.confidence}'
+        )
+        member_file_ids = list(
+            session.execute(
+                select(DuplicateGroupMember.file_id).where(DuplicateGroupMember.group_id == group.id)
+            ).scalars()
+        )
+        member_files = {
+            file.id: file
+            for file in session.execute(
+                select(FileRecord).where(FileRecord.id.in_(member_file_ids))
+            ).scalars()
+        }
+        pair_rows = list(
+            session.execute(
+                select(DuplicatePairEvidence).where(DuplicatePairEvidence.group_id == group.id)
+            ).scalars()
+        )
+        for reason in _group_reasons(pair_rows):
+            typer.echo(f'  reason: {reason}')
+        for pair in pair_rows:
+            left = member_files.get(pair.left_file_id)
+            right = member_files.get(pair.right_file_id)
+            typer.echo(
+                '  evidence: '
+                f'{left.public_id if left else pair.left_file_id} vs '
+                f'{right.public_id if right else pair.right_file_id} '
+                f'classification={pair.classification.value} confidence={pair.confidence}'
+            )
+            for reason in (pair.evidence_json or {}).get('reasons', []):
+                typer.echo(f'    - {reason}')
+
+        choice = _preferred_choice_among(session, member_files.values())
+        if choice is not None and choice.file_id in member_files:
+            typer.echo(f'  preferred file: {member_files[choice.file_id].public_id}')
+            for reason in choice.reasons:
+                typer.echo(f'    - {reason}')
+
+    events = list(
+        session.execute(
+            select(CurationEvent)
+            .where(
+                (CurationEvent.track_public_id == track.public_id)
+                | (CurationEvent.file_public_id.in_(file_public_ids))
+            )
+            .order_by(CurationEvent.sequence)
+        ).scalars()
+    )
+    if events:
+        typer.echo('')
+        typer.echo('human decision provenance:')
+        for event in events:
+            payload = event.payload_json or {}
+            typer.echo(
+                f'  [{event.sequence}] {event.event_type} '
+                f'decision_source={payload.get("decision_source", "-")} '
+                f'decision={payload.get("decision", "-")} '
+                f'reviewed_at={payload.get("reviewed_at", "-")}'
+            )

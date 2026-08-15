@@ -1281,7 +1281,7 @@ git commit -m "feat: rebuild catalog and prove incremental idempotence"
 **Interfaces:**
 - Deterministic local fixtures covering exact duplicate, same audio re-encode, version conflict, malformed tags, filename fallback and corrupt file.
 
-- [ ] **Step 1: Write fixture builder**
+- [x] **Step 1: Write fixture builder**
 
 Generate synthetic audio using ffmpeg only; no copyrighted music in repository. Produce:
 
@@ -1297,7 +1297,7 @@ corrupt/
 
 Use synthetic tone/noise PCM; re-encode same PCM for FLAC/MP3 equivalence; create shortened/extended variants for conflict fixtures.
 
-- [ ] **Step 2: Write end-to-end test before fixture generation**
+- [x] **Step 2: Write end-to-end test before fixture generation**
 
 Flow:
 
@@ -1316,13 +1316,13 @@ compare curated projection
 
 Hash every source fixture before/after and assert no source change.
 
-- [ ] **Step 3: Verify missing-fixture failure**
+- [x] **Step 3: Verify missing-fixture failure**
 
 ```bash
 pytest tests/integration/test_end_to_end.py -v
 ```
 
-- [ ] **Step 4: Generate fixtures and run full suite**
+- [x] **Step 4: Generate fixtures and run full suite**
 
 ```bash
 python tests/fixtures/build_audio_fixtures.py
@@ -1332,7 +1332,7 @@ pytest --cov=djlib --cov-report=term-missing
 
 Critical parser, conflict, decision, replay and rebuild branches must all have explicit behavioral tests.
 
-- [ ] **Step 5: Document operator workflow**
+- [x] **Step 5: Document operator workflow**
 
 README must contain:
 
@@ -1349,7 +1349,7 @@ djlib catalog inspect <public-id>
 
 State explicitly that physical cleanup is outside `djlib`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tests/fixtures tests/integration/test_end_to_end.py README.md
