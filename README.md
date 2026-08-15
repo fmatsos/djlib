@@ -26,6 +26,26 @@ for the design and
 `docs/superpowers/plans/2026-08-15-djlib-milestone-1-implementation.md` for
 the task-by-task implementation history.
 
+## Installation
+
+See `INSTALL.md` for full instructions. Short version:
+
+- **Local install** (dev/testing): `python -m pip install -e '.[dev]'` plus
+  `exiftool`, `ffmpeg` and `libchromaprint-tools` on `PATH`.
+- **Proxmox LXC** (production, `/music` read-only + `/data` read/write): one
+  command on the Proxmox host provisions the container, installs every
+  requirement, installs djlib, writes the default config and migrates the
+  database -- ready to use:
+
+  ```bash
+  CTID=200 MUSIC_SRC=/mnt/tank/djing DATA_SRC=/mnt/tank/djlib \
+    ./infra/lxc/create-container.sh
+  ```
+
+  The individual steps (`infra/lxc/configure-mounts.sh`,
+  `infra/lxc/bootstrap.sh`, `infra/lxc/install-djlib.sh`) are also usable on
+  their own -- see `INSTALL.md`.
+
 ## Development
 
 ```bash
