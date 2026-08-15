@@ -1,5 +1,6 @@
 from rapidfuzz import fuzz
 
+from djlib.config import DurationToleranceThresholds
 from djlib.duplicates.types import (
     MetadataEvidence,
     TrackIdentitySnapshot,
@@ -30,20 +31,28 @@ _ALTERNATE_FORM_MARKERS = frozenset({'live', 'instrumental', 'bootleg'})
 FUZZY_TITLE_THRESHOLD = 85.0
 
 
-def duration_tolerance_ms(duration_ms: int) -> int:
+def duration_tolerance_ms(
+    duration_ms: int, thresholds: DurationToleranceThresholds | None = None
+) -> int:
     """Duration-bucket tolerance for blocking (design §14).
 
     Boundaries: a duration of exactly 5 minutes (300_000 ms) falls in the
-    "<=5 min" bucket (2000 ms); a duration of exactly 10 minutes (600_000 ms)
-    falls in the "5-10 min" bucket (3000 ms). Anything past 10 minutes gets
-    the widest window (5000 ms), since longer tracks naturally have more
-    encoder/tagging jitter in their reported duration.
+    "<=5 min" bucket (`short_ms`); a duration of exactly 10 minutes
+    (600_000 ms) falls in the "5-10 min" bucket (`medium_ms`). Anything past
+    10 minutes gets the widest window (`long_ms`), since longer tracks
+    naturally have more encoder/tagging jitter in their reported duration.
+
+    `thresholds` defaults to `DurationToleranceThresholds()` (2000/3000/5000
+    ms) -- Task 10 wires the real, config-driven values through via
+    `DjlibConfig.duplicates.duration`; existing callers that don't pass one
+    keep the original hardcoded behavior unchanged.
     """
+    resolved = thresholds or DurationToleranceThresholds()
     if duration_ms <= _FIVE_MINUTES_MS:
-        return 2000
+        return resolved.short_ms
     if duration_ms <= _TEN_MINUTES_MS:
-        return 3000
-    return 5000
+        return resolved.medium_ms
+    return resolved.long_ms
 
 
 def _normalized_or_empty(value: str | None) -> str:

@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from djlib.catalog.queries import active_track_for_file
+from djlib.config import DurationToleranceThresholds
 from djlib.db.models import FileRecord, Track, TrackFeaturedArtist, TrackFile
 from djlib.duplicates.similarity import (
     FUZZY_TITLE_THRESHOLD,
@@ -72,8 +73,11 @@ class CandidateBlocker:
     human review (Task 10) instead of disappearing silently.
     """
 
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self, session: Session, duration_thresholds: DurationToleranceThresholds | None = None
+    ) -> None:
         self._session = session
+        self._duration_thresholds = duration_thresholds
 
     def find_candidates(self, file_id: int) -> list[CandidatePair]:
         source_file = self._session.get(FileRecord, file_id)
@@ -83,7 +87,7 @@ class CandidateBlocker:
         if source_track is None:
             return []
 
-        tolerance_ms = duration_tolerance_ms(source_file.duration_ms)
+        tolerance_ms = duration_tolerance_ms(source_file.duration_ms, self._duration_thresholds)
         low = source_file.duration_ms - tolerance_ms
         high = source_file.duration_ms + tolerance_ms
 
