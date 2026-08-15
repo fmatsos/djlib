@@ -5,6 +5,8 @@ from pathlib import Path
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from djlib.catalog.queries import active_track_for_file
+from djlib.catalog.service import CatalogService
 from djlib.config import DjlibConfig
 from djlib.db.enums import ScanStatus
 from djlib.db.models import FileFeaturedArtist, FileRecord, ScanRun
@@ -64,8 +66,11 @@ class ScanService:
                 for record in session.execute(select(FileRecord)).scalars()
             }
 
+            catalog_service = CatalogService(session)
+
             for item in discovered:
                 record = existing.get(item.relative_path)
+                is_new = record is None
                 needs_extraction: bool
                 if record is None:
                     record = FileRecord(
@@ -79,6 +84,7 @@ class ScanService:
                         last_seen_at=now,
                     )
                     session.add(record)
+                    session.flush()
                     files_new += 1
                     needs_extraction = True
                 elif record.size_bytes == item.size_bytes and record.mtime_ns == item.mtime_ns:
@@ -94,6 +100,7 @@ class ScanService:
                     files_changed += 1
                     needs_extraction = True
 
+                resolved_this_scan = False
                 if needs_extraction:
                     try:
                         extracted = self._metadata_extractor.extract(
@@ -105,6 +112,20 @@ class ScanService:
                     else:
                         _apply_metadata(record, extracted, now)
                         self._apply_resolution(session, record)
+                        resolved_this_scan = True
+
+                # A file always owns exactly one provisional track from the moment it is
+                # first seen, even if metadata extraction failed for it this scan -- see
+                # design §8. Rescans never merge tracks by resemblance; a CHANGED file's
+                # existing track only has its copied identity fields refreshed in place.
+                if is_new:
+                    catalog_service.create_provisional_track(record)
+                elif resolved_this_scan:
+                    track = active_track_for_file(session, record.id)
+                    if track is None:
+                        catalog_service.create_provisional_track(record)
+                    else:
+                        catalog_service.refresh_track_identity(track, record)
 
             for relative_path, record in existing.items():
                 if relative_path not in seen_paths:

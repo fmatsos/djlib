@@ -577,29 +577,29 @@ git commit -m "feat: resolve and normalize dj metadata conservatively"
 - `CatalogService.effective_identity(track: Track) -> EffectiveIdentity`
 - CLI `catalog stats`, `catalog inspect <public-id>`
 
-- [ ] **Step 1: Write one-file-one-provisional-track test**
+- [x] **Step 1: Write one-file-one-provisional-track test**
 
 After first scan of two source files, assert two `FileRecord`, two `PROVISIONAL` tracks and one active PRIMARY relation per file.
 
-- [ ] **Step 2: Verify failure**
+- [x] **Step 2: Verify failure**
 
 ```bash
 pytest tests/integration/test_catalog.py -v
 ```
 
-- [ ] **Step 3: Implement provisional creation**
+- [x] **Step 3: Implement provisional creation**
 
 A newly scanned file always creates its own provisional track. Scan never merges two files by similar tags alone.
 
-- [ ] **Step 4: Copy effective resolved identity and featured artists to track**
+- [x] **Step 4: Copy effective resolved identity and featured artists to track**
 
 Keep file raw/resolved metadata separate from track semantic identity.
 
-- [ ] **Step 5: Add catalogue stats/inspect**
+- [x] **Step 5: Add catalogue stats/inspect**
 
 `stats` includes file presence, track statuses and metadata errors. `inspect` accepts `fil_...` or `trk_...` and shows raw/resolved/effective identity, provenance and analysis statuses.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 ```bash
 pytest tests/integration/test_catalog.py -v
