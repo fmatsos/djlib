@@ -255,7 +255,7 @@ git commit -m "chore: bootstrap djlib project and lxc runtime"
 - `session_factory(engine: Engine)`
 - ORM models for files, tracks, scans, duplicates, quality, decisions, curation and app state.
 
-- [ ] **Step 1: Write failing SQLite-pragmas test**
+- [x] **Step 1: Write failing SQLite-pragmas test**
 
 ```python
 from sqlalchemy import text
@@ -267,18 +267,18 @@ def test_sqlite_pragmas(engine) -> None:
         assert c.execute(text('PRAGMA busy_timeout')).scalar_one() > 0
 ```
 
-- [ ] **Step 2: Verify failure**
+- [x] **Step 2: Verify failure**
 
 ```bash
 pytest tests/integration/test_database.py -v
 ```
 
-- [ ] **Step 3: Define enums**
+- [x] **Step 3: Define enums**
 
 Implement string enums for:
 `ScanStatus`, `TrackStatus`, `AnalysisStatus`, `RelationshipType`, `DecisionSource`, `DuplicateStatus`, `PairClassification`, `TranscodeSuspicion`.
 
-- [ ] **Step 4: Implement SQLite engine setup**
+- [x] **Step 4: Implement SQLite engine setup**
 
 ```python
 from sqlalchemy import create_engine, event
@@ -296,7 +296,7 @@ def create_engine_for_config(config):
     return engine
 ```
 
-- [ ] **Step 5: Implement full Milestone-1 model set**
+- [x] **Step 5: Implement full Milestone-1 model set**
 
 Create ORM models with the exact responsibilities from the approved design:
 
@@ -320,7 +320,7 @@ AppState
 
 Use JSON columns for raw metadata/evidence/payload and immutable `public_id` columns for externally referenced entities.
 
-- [ ] **Step 6: Enforce one active logical track per file**
+- [x] **Step 6: Enforce one active logical track per file**
 
 Add a partial unique index in migration:
 
@@ -330,14 +330,14 @@ ON track_files(file_id)
 WHERE is_active = 1;
 ```
 
-- [ ] **Step 7: Create/apply first migration**
+- [x] **Step 7: Create/apply first migration**
 
 ```bash
 alembic upgrade head
 pytest tests/integration/test_database.py -v
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/djlib/db alembic.ini alembic tests/integration/test_database.py
@@ -358,7 +358,7 @@ git commit -m "feat: add catalog database schema and migrations"
 - `discover_audio_files(root: Path) -> Iterator[DiscoveredFile]`
 - `ScanService.scan(full: bool = False) -> ScanSummary`
 
-- [ ] **Step 1: Write discovery test**
+- [x] **Step 1: Write discovery test**
 
 ```python
 def test_discovers_only_supported_audio(tmp_path):
@@ -368,17 +368,17 @@ def test_discovers_only_supported_audio(tmp_path):
     assert [x.relative_path for x in discover_audio_files(tmp_path)] == ['a.mp3', 'b.flac']
 ```
 
-- [ ] **Step 2: Write NEW/UNCHANGED/CHANGED/MISSING integration test**
+- [x] **Step 2: Write NEW/UNCHANGED/CHANGED/MISSING integration test**
 
 Run four scans while creating, preserving, modifying and deleting a fixture; assert counters and `is_present` behavior.
 
-- [ ] **Step 3: Verify failures**
+- [x] **Step 3: Verify failures**
 
 ```bash
 pytest tests/unit/test_scanner.py tests/integration/test_scan.py -v
 ```
 
-- [ ] **Step 4: Implement deterministic cheap discovery**
+- [x] **Step 4: Implement deterministic cheap discovery**
 
 Supported extensions:
 
@@ -388,7 +388,7 @@ Supported extensions:
 
 Discovery reads only path/stat information and sorts relative paths.
 
-- [ ] **Step 5: Implement scan lifecycle**
+- [x] **Step 5: Implement scan lifecycle**
 
 Rules:
 
@@ -401,17 +401,17 @@ unseen after successful discovery -> is_present=false
 
 Never mark missing after an aborted discovery pass.
 
-- [ ] **Step 6: Add `djlib scan [--full]`**
+- [x] **Step 6: Add `djlib scan [--full]`**
 
 Print seen/new/changed/unchanged/missing/failed counts and scan public ID.
 
-- [ ] **Step 7: Run tests**
+- [x] **Step 7: Run tests**
 
 ```bash
 pytest tests/unit/test_scanner.py tests/integration/test_scan.py -v
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/djlib/scan src/djlib/cli.py tests/unit/test_scanner.py tests/integration/test_scan.py
@@ -431,7 +431,7 @@ git commit -m "feat: add incremental filesystem scanning"
 - `MetadataExtractor.extract(path: Path) -> ExtractedMetadata`
 - `RawMetadata`, `TechnicalMetadata`, `ExtractedMetadata`
 
-- [ ] **Step 1: Write ExifTool adapter test**
+- [x] **Step 1: Write ExifTool adapter test**
 
 Mock JSON:
 
@@ -441,17 +441,17 @@ Mock JSON:
 
 Assert title/artist/BPM and complete raw JSON are preserved.
 
-- [ ] **Step 2: Write ffprobe adapter test**
+- [x] **Step 2: Write ffprobe adapter test**
 
 Mock a stream with codec `flac`, sample rate `44100`, channels `2`, bit depth `16`, duration `401.25`; assert normalized technical values.
 
-- [ ] **Step 3: Verify failures**
+- [x] **Step 3: Verify failures**
 
 ```bash
 pytest tests/unit/test_metadata_extractor.py -v
 ```
 
-- [ ] **Step 4: Implement subprocess runner abstraction**
+- [x] **Step 4: Implement subprocess runner abstraction**
 
 ```python
 class CommandRunner(Protocol):
@@ -460,7 +460,7 @@ class CommandRunner(Protocol):
 
 Production uses `subprocess.run(check=False, capture_output=True, text=True)`.
 
-- [ ] **Step 5: Implement ExifTool call**
+- [x] **Step 5: Implement ExifTool call**
 
 ```bash
 exiftool -j -n -Title -Artist -Album -AlbumArtist -Genre -BPM -InitialKey -Comment <file>
@@ -468,17 +468,17 @@ exiftool -j -n -Title -Artist -Album -AlbumArtist -Genre -BPM -InitialKey -Comme
 
 Valid JSON output remains usable even when stderr contains warnings; malformed/empty output is a per-file extraction error.
 
-- [ ] **Step 6: Implement ffprobe call**
+- [x] **Step 6: Implement ffprobe call**
 
 ```bash
 ffprobe -v error -print_format json -show_format -show_streams <file>
 ```
 
-- [ ] **Step 7: Integrate with scan**
+- [x] **Step 7: Integrate with scan**
 
 NEW/CHANGED and all files under `--full` are extracted. Per-file error sets metadata state ERROR, increments failed count and continues. Infrastructure failure remains fatal.
 
-- [ ] **Step 8: Test corrupt-file behavior**
+- [x] **Step 8: Test corrupt-file behavior**
 
 ```python
 summary = service.scan(full=True)
@@ -486,7 +486,7 @@ assert summary.status == ScanStatus.SUCCESS_WITH_ERRORS
 assert summary.files_failed == 1
 ```
 
-- [ ] **Step 9: Run tests and commit**
+- [x] **Step 9: Run tests and commit**
 
 ```bash
 pytest tests/unit/test_metadata_extractor.py tests/integration/test_scan_metadata_errors.py -v
@@ -510,11 +510,11 @@ git commit -m "feat: extract audio tags and technical metadata"
 - `split_featured_artists(artist: str) -> FeaturedArtistParse`
 - `MetadataResolver.resolve(file_name, raw) -> ResolvedMetadata`
 
-- [ ] **Step 1: Write normalization tests**
+- [x] **Step 1: Write normalization tests**
 
 Cover Unicode canonicalization, casefold, typographic dash/quote normalization, whitespace collapse, while retaining meaningful `&`, `+`, `vs.`, `pres.`.
 
-- [ ] **Step 2: Write filename tests**
+- [x] **Step 2: Write filename tests**
 
 Must parse:
 
@@ -528,21 +528,21 @@ Artist - Title (Version).ext
 
 Must not invent artist/title from ambiguous `Acid Track Final New 2.flac`.
 
-- [ ] **Step 3: Write version/edition tests**
+- [x] **Step 3: Write version/edition tests**
 
 Cover Remix, Mix, Original Mix, Extended Mix, Radio Edit, Club Mix, Re-edit, Rework, Bootleg, Mashup, VIP, Dub, Instrumental, Live, and separate Remaster/Anniversary/Deluxe/Reissue editions.
 
-- [ ] **Step 4: Write featuring tests**
+- [x] **Step 4: Write featuring tests**
 
 Cover `feat.`, `ft.`, `featuring`; preserve ordered featured artists.
 
-- [ ] **Step 5: Verify failures**
+- [x] **Step 5: Verify failures**
 
 ```bash
 pytest tests/unit/test_normalizer.py tests/unit/test_filename_parser.py tests/unit/test_version_parser.py tests/unit/test_featured_artists.py -v
 ```
 
-- [ ] **Step 6: Implement resolver priority**
+- [x] **Step 6: Implement resolver priority**
 
 ```python
 resolved = valid_tag or conservative_filename_value or None
@@ -551,11 +551,11 @@ source = 'TAG' if valid_tag else 'FILENAME' if conservative_filename_value else 
 
 Raw values remain untouched.
 
-- [ ] **Step 7: Integrate resolver after metadata extraction**
+- [x] **Step 7: Integrate resolver after metadata extraction**
 
 Persist resolved artist/title/version/edition and file-level featured artists.
 
-- [ ] **Step 8: Run tests and commit**
+- [x] **Step 8: Run tests and commit**
 
 ```bash
 pytest tests/unit/test_normalizer.py tests/unit/test_filename_parser.py tests/unit/test_version_parser.py tests/unit/test_featured_artists.py -v
@@ -577,29 +577,29 @@ git commit -m "feat: resolve and normalize dj metadata conservatively"
 - `CatalogService.effective_identity(track: Track) -> EffectiveIdentity`
 - CLI `catalog stats`, `catalog inspect <public-id>`
 
-- [ ] **Step 1: Write one-file-one-provisional-track test**
+- [x] **Step 1: Write one-file-one-provisional-track test**
 
 After first scan of two source files, assert two `FileRecord`, two `PROVISIONAL` tracks and one active PRIMARY relation per file.
 
-- [ ] **Step 2: Verify failure**
+- [x] **Step 2: Verify failure**
 
 ```bash
 pytest tests/integration/test_catalog.py -v
 ```
 
-- [ ] **Step 3: Implement provisional creation**
+- [x] **Step 3: Implement provisional creation**
 
 A newly scanned file always creates its own provisional track. Scan never merges two files by similar tags alone.
 
-- [ ] **Step 4: Copy effective resolved identity and featured artists to track**
+- [x] **Step 4: Copy effective resolved identity and featured artists to track**
 
 Keep file raw/resolved metadata separate from track semantic identity.
 
-- [ ] **Step 5: Add catalogue stats/inspect**
+- [x] **Step 5: Add catalogue stats/inspect**
 
 `stats` includes file presence, track statuses and metadata errors. `inspect` accepts `fil_...` or `trk_...` and shows raw/resolved/effective identity, provenance and analysis statuses.
 
-- [ ] **Step 6: Run tests and commit**
+- [x] **Step 6: Run tests and commit**
 
 ```bash
 pytest tests/integration/test_catalog.py -v
@@ -621,7 +621,7 @@ git commit -m "feat: create provisional tracks and catalog inspection"
 - `metadata_similarity(left, right) -> MetadataEvidence`
 - `CandidateBlocker.find_candidates(file_id: int) -> list[CandidatePair]`
 
-- [ ] **Step 1: Write duration-window tests**
+- [x] **Step 1: Write duration-window tests**
 
 ```text
 <=5 min => 2000 ms
@@ -629,7 +629,7 @@ git commit -m "feat: create provisional tracks and catalog inspection"
 >10 min => 5000 ms
 ```
 
-- [ ] **Step 2: Write anti-false-positive version tests**
+- [x] **Step 2: Write anti-false-positive version tests**
 
 Explicitly incompatible:
 
@@ -644,17 +644,17 @@ Bootleg vs Original
 
 `Original Mix` vs empty is compatible-with-penalty, not identical.
 
-- [ ] **Step 3: Write featuring-tolerance tests**
+- [x] **Step 3: Write featuring-tolerance tests**
 
 Missing feat on one side does not exclude; conflicting explicit feats reduce confidence.
 
-- [ ] **Step 4: Verify failures**
+- [x] **Step 4: Verify failures**
 
 ```bash
 pytest tests/unit/test_similarity.py tests/unit/test_blocking.py -v
 ```
 
-- [ ] **Step 5: Implement explicit evidence object**
+- [x] **Step 5: Implement explicit evidence object**
 
 ```python
 @dataclass(frozen=True)
@@ -670,11 +670,11 @@ class MetadataEvidence:
 
 Use RapidFuzz for string similarity; keep each component.
 
-- [ ] **Step 6: Implement conservative SQL blocking**
+- [x] **Step 6: Implement conservative SQL blocking**
 
 Strong path: normalized artist/title + duration. Fuzzy title path allowed. Missing artist path requires very close title+duration. Explicit incompatible versions never enter automatic merge path.
 
-- [ ] **Step 7: Run tests and commit**
+- [x] **Step 7: Run tests and commit**
 
 ```bash
 pytest tests/unit/test_similarity.py tests/unit/test_blocking.py -v
@@ -698,11 +698,11 @@ git commit -m "feat: add duplicate candidate blocking and metadata evidence"
 - `fingerprint_similarity(left, right) -> float`
 - CLI `duplicates calibrate`
 
-- [ ] **Step 1: Write exact-copy hash test and cache test**
+- [x] **Step 1: Write exact-copy hash test and cache test**
 
 Two byte-identical files must produce the same BLAKE3. Two calls with unchanged `(size,mtime_ns,analyzer_version)` invoke the hasher once.
 
-- [ ] **Step 2: Write fpcalc JSON parser/cache tests**
+- [x] **Step 2: Write fpcalc JSON parser/cache tests**
 
 Use fixture:
 
@@ -712,13 +712,13 @@ Use fixture:
 
 Assert fingerprint/duration parsing and cache invalidation after source signature changes.
 
-- [ ] **Step 3: Verify failures**
+- [x] **Step 3: Verify failures**
 
 ```bash
 pytest tests/unit/test_hashing.py tests/unit/test_chromaprint.py tests/integration/test_analysis_cache.py -v
 ```
 
-- [ ] **Step 4: Implement streaming BLAKE3**
+- [x] **Step 4: Implement streaming BLAKE3**
 
 ```python
 h = blake3()
@@ -730,7 +730,7 @@ return h.hexdigest()
 
 Only candidate analysis requests hashes.
 
-- [ ] **Step 5: Implement `fpcalc -json` adapter and cache**
+- [x] **Step 5: Implement `fpcalc -json` adapter and cache**
 
 ```bash
 fpcalc -json <file>
@@ -738,15 +738,15 @@ fpcalc -json <file>
 
 Only run when binary hashes differ and metadata/duration remain plausible.
 
-- [ ] **Step 6: Implement similarity behind one function**
+- [x] **Step 6: Implement similarity behind one function**
 
 Keep the algorithm encapsulated in `fingerprint_similarity()` so it can be replaced without changing classification code.
 
-- [ ] **Step 7: Implement calibration data export**
+- [x] **Step 7: Implement calibration data export**
 
 `djlib duplicates calibrate` emits CSV/JSON containing exact positives, likely same-version different-encoding pairs, explicit version conflicts, similarity and duration delta. It never silently rewrites thresholds.
 
-- [ ] **Step 8: Run tests and commit**
+- [x] **Step 8: Run tests and commit**
 
 ```bash
 pytest tests/unit/test_hashing.py tests/unit/test_chromaprint.py tests/integration/test_analysis_cache.py -v
@@ -766,7 +766,7 @@ git commit -m "feat: add targeted hash and chromaprint evidence"
 - `QualityAnalyzer.analyze(path: Path, file: FileRecord) -> QualityResult`
 - Persists versioned `FileQualityAnalysis` rows.
 
-- [ ] **Step 1: Write scoring-order tests**
+- [x] **Step 1: Write scoring-order tests**
 
 Assert:
 - corrupt < valid,
@@ -774,13 +774,13 @@ Assert:
 - HIGH transcode suspicion strongly penalizes a nominally lossless file,
 - metadata completeness breaks close ties but cannot compensate for a large audio deficit.
 
-- [ ] **Step 2: Verify failures**
+- [x] **Step 2: Verify failures**
 
 ```bash
 pytest tests/unit/test_quality.py -v
 ```
 
-- [ ] **Step 3: Implement integrity decode**
+- [x] **Step 3: Implement integrity decode**
 
 Use:
 
@@ -790,19 +790,19 @@ ffmpeg -v error -i <file> -f null -
 
 Non-zero decode result marks integrity failure.
 
-- [ ] **Step 4: Implement deterministic technical measurements**
+- [x] **Step 4: Implement deterministic technical measurements**
 
 Collect codec, effective bitrate, sample rate, bit depth, channels, peak/loudness and clipping indicators with ffmpeg/ffprobe. Store raw measurements in `details_json`.
 
-- [ ] **Step 5: Implement conservative transcode suspicion**
+- [x] **Step 5: Implement conservative transcode suspicion**
 
 Return only `NONE`, `LOW`, `MEDIUM`, `HIGH`; store heuristic evidence and never assert a definitive lossy origin without proof.
 
-- [ ] **Step 6: Persist versioned results and prove targeting**
+- [x] **Step 6: Persist versioned results and prove targeting**
 
 A plain `djlib scan` must not invoke quality analysis. Candidate analysis may invoke it once and reuse it while source signature/analyzer version remain current.
 
-- [ ] **Step 7: Run tests and commit**
+- [x] **Step 7: Run tests and commit**
 
 ```bash
 pytest tests/unit/test_quality.py tests/integration/test_quality_analysis.py -v
@@ -826,7 +826,7 @@ git commit -m "feat: add targeted duplicate quality analysis"
 - `PreferredFileSelector.choose(files) -> PreferredChoice`
 - `DuplicateService.detect()`, `.analyze()`, `.run()`, `.stats()`
 
-- [ ] **Step 1: Write classifier tests**
+- [x] **Step 1: Write classifier tests**
 
 Expected outcomes:
 
@@ -840,7 +840,7 @@ high fingerprint + explicit version conflict => CONFLICT
 
 Inject threshold config into tests; do not embed magic numbers in classifier tests.
 
-- [ ] **Step 2: Write non-transitive group test**
+- [x] **Step 2: Write non-transitive group test**
 
 ```text
 A-B AUDIO_EQUIVALENT
@@ -850,21 +850,21 @@ A-C DIFFERENT
 
 must produce `REVIEW_REQUIRED`, never naive auto-confirmation.
 
-- [ ] **Step 3: Write preferred-master tests**
+- [x] **Step 3: Write preferred-master tests**
 
 Cover clean lossless vs MP3, suspicious lossless vs clean MP3, metadata tie-break, and historical value being unable to override a clear technical loss.
 
-- [ ] **Step 4: Write automatic-consolidation integration test**
+- [x] **Step 4: Write automatic-consolidation integration test**
 
 Two provisional tracks with exact duplicate bytes become one ACTIVE track plus one MERGED track; both files become active members of the surviving track; no source path/content changes.
 
-- [ ] **Step 5: Verify failures**
+- [x] **Step 5: Verify failures**
 
 ```bash
 pytest tests/unit/test_classifier.py tests/unit/test_group_builder.py tests/unit/test_preferred.py tests/integration/test_duplicate_pipeline.py -v
 ```
 
-- [ ] **Step 6: Add explicit initial thresholds to config**
+- [x] **Step 6: Add explicit initial thresholds to config**
 
 ```toml
 [duplicates.duration]
@@ -879,7 +879,7 @@ review_floor = 0.93
 
 These are starting values subject to real-library calibration, not immutable truth.
 
-- [ ] **Step 7: Implement classifier order**
+- [x] **Step 7: Implement classifier order**
 
 ```text
 binary-equal => EXACT
@@ -889,22 +889,22 @@ plausible/intermediate => PROBABLE
 otherwise => DIFFERENT
 ```
 
-- [ ] **Step 8: Implement graph-aware grouping**
+- [x] **Step 8: Implement graph-aware grouping**
 
 Auto-confirm only mutually consistent connected components. Any contradictory pair makes the group `REVIEW_REQUIRED`.
 
-- [ ] **Step 9: Implement preferred choice**
+- [x] **Step 9: Implement preferred choice**
 
 Return explicit reasons and separate `audio_quality_score`, `metadata_quality_score`, future-compatible `historical_value`. Ordered priority: integrity → audio quality → no suspicious transcode → genuine lossless → useful resolution → clipping/anomalies → metadata → history tie-break.
 
-- [ ] **Step 10: Implement duplicate service**
+- [x] **Step 10: Implement duplicate service**
 
 `detect`: candidates/groups.  
 `analyze`: BLAKE3 → conditional Chromaprint → quality → classification → preferred proposal.  
 `run`: detect + analyze + safe auto-consolidation.  
 `stats`: counts by group/pair status.
 
-- [ ] **Step 11: Add CLI commands**
+- [x] **Step 11: Add CLI commands**
 
 ```text
 djlib duplicates detect
@@ -915,7 +915,7 @@ djlib duplicates stats
 
 `duplicates run` does not generate HTML.
 
-- [ ] **Step 12: Run tests and commit**
+- [x] **Step 12: Run tests and commit**
 
 ```bash
 pytest tests/unit/test_classifier.py tests/unit/test_group_builder.py tests/unit/test_preferred.py tests/integration/test_duplicate_pipeline.py -v
@@ -937,33 +937,33 @@ git commit -m "feat: classify duplicates and select preferred masters"
 - `CatalogService.merge_tracks(source_public_id, target_public_id)`
 - `CatalogService.split_track(source_public_id, file_public_ids) -> Track`
 
-- [ ] **Step 1: Write override-rescan test**
+- [x] **Step 1: Write override-rescan test**
 
 Create a human artist override, modify source metadata, rescan, assert effective artist remains override while new raw/resolved source values remain visible.
 
-- [ ] **Step 2: Write immutable merge test**
+- [x] **Step 2: Write immutable merge test**
 
 Source becomes `MERGED`, target remains ACTIVE, public IDs remain unchanged, no ID reuse, MERGE identity event exists.
 
-- [ ] **Step 3: Write split test**
+- [x] **Step 3: Write split test**
 
 Move selected file relationship to a newly created public track ID, retain original ID for remaining files, create SPLIT identity event.
 
-- [ ] **Step 4: Verify failures**
+- [x] **Step 4: Verify failures**
 
 ```bash
 pytest tests/integration/test_track_curation.py -v
 ```
 
-- [ ] **Step 5: Implement append-only override semantics**
+- [x] **Step 5: Implement append-only override semantics**
 
 Supersede previous active override with `superseded_at`; never delete historical override rows.
 
-- [ ] **Step 6: Implement transactional merge/split**
+- [x] **Step 6: Implement transactional merge/split**
 
 Track statuses, relationships, preferred-file adjustment and `TrackIdentityEvent` are committed atomically.
 
-- [ ] **Step 7: Run tests and commit**
+- [x] **Step 7: Run tests and commit**
 
 ```bash
 pytest tests/integration/test_track_curation.py -v
@@ -987,7 +987,7 @@ git commit -m "feat: preserve human track curation and identity history"
 - Output `/data/reports/duplicates-review-YYYYMMDD-HHMMSS/{index.html,manifest.json}`
 - Browser export schema version 1.
 
-- [ ] **Step 1: Write JSON Schema tests**
+- [x] **Step 1: Write JSON Schema tests**
 
 Only these actions are valid:
 
@@ -1000,21 +1000,21 @@ DEFER
 
 `CHANGE_PREFERRED` requires `preferred_file_id`.
 
-- [ ] **Step 2: Write report artifact integration test**
+- [x] **Step 2: Write report artifact integration test**
 
 Seed a REVIEW_REQUIRED group and assert manifest includes report ID, catalog revision, source signatures, group evidence, quality values, proposed preferred file and reasons.
 
-- [ ] **Step 3: Verify failures**
+- [x] **Step 3: Verify failures**
 
 ```bash
 pytest tests/unit/test_decision_schema.py tests/integration/test_report_decisions.py -v
 ```
 
-- [ ] **Step 4: Implement deterministic catalog revision**
+- [x] **Step 4: Implement deterministic catalog revision**
 
 Revision combines latest completed scan public ID, latest duplicate-analysis run public ID and current max curation sequence.
 
-- [ ] **Step 5: Implement static report UI**
+- [x] **Step 5: Implement static report UI**
 
 Required:
 - filters: classification/reason, confidence, format, decision state,
@@ -1026,7 +1026,7 @@ Required:
 
 No server and no audio previews.
 
-- [ ] **Step 6: Implement reversible in-browser decisions and export**
+- [x] **Step 6: Implement reversible in-browser decisions and export**
 
 `app.js` stores page-local decisions and exports:
 
@@ -1040,14 +1040,14 @@ No server and no audio previews.
 }
 ```
 
-- [ ] **Step 7: Add CLI and run tests**
+- [x] **Step 7: Add CLI and run tests**
 
 ```bash
 djlib duplicates report
 pytest tests/unit/test_decision_schema.py tests/integration/test_report_decisions.py -v
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/djlib/report src/djlib/cli.py tests/unit/test_decision_schema.py tests/integration/test_report_decisions.py
@@ -1067,21 +1067,21 @@ git commit -m "feat: generate static duplicate review reports"
 - `DecisionImporter.import_file(path: Path) -> ImportSummary`
 - `CurationJournal.export_pending() -> int`
 
-- [ ] **Step 1: Write stale-import rejection tests**
+- [x] **Step 1: Write stale-import rejection tests**
 
 Atomically reject unsupported schema, unknown report, changed catalog/group, vanished group, changed affected file signature. Assert zero partial writes.
 
-- [ ] **Step 2: Write journal-gap repair test**
+- [x] **Step 2: Write journal-gap repair test**
 
 Commit sequences 1 and 2, export only 1, call `export_pending()`, assert sequence 2 is appended exactly once.
 
-- [ ] **Step 3: Verify failures**
+- [x] **Step 3: Verify failures**
 
 ```bash
 pytest tests/integration/test_decision_import.py tests/integration/test_curation_journal.py -v
 ```
 
-- [ ] **Step 4: Implement validation before business write**
+- [x] **Step 4: Implement validation before business write**
 
 Order:
 
@@ -1097,25 +1097,25 @@ file signatures
 
 No force override.
 
-- [ ] **Step 5: Implement decision semantics**
+- [x] **Step 5: Implement decision semantics**
 
 `CONFIRM`: group CONFIRMED + proposed preferred accepted.  
 `CHANGE_PREFERRED`: CONFIRMED + human-selected preferred.  
 `REJECT`: REJECTED + durable human negative constraint preventing future silent re-merge.  
 `DEFER`: DEFERRED + identities remain separate.
 
-- [ ] **Step 6: Implement SQLite-first monotonic curation events**
+- [x] **Step 6: Implement SQLite-first monotonic curation events**
 
 Accepted actions insert committed `CurationEvent` rows in the same DB transaction. After COMMIT, append pending events to `/data/curation/events.jsonl`, then advance `last_exported_curation_sequence`.
 
-- [ ] **Step 7: Add CLI and run tests**
+- [x] **Step 7: Add CLI and run tests**
 
 ```bash
 djlib duplicates import-decisions /data/decisions/decisions.json
 pytest tests/integration/test_decision_import.py tests/integration/test_curation_journal.py -v
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/djlib/curation src/djlib/cli.py tests/integration/test_decision_import.py tests/integration/test_curation_journal.py
@@ -1137,11 +1137,11 @@ git commit -m "feat: import human decisions and persist curation journal"
 - CLI `runs show <run-id>`
 - `Doctor.run() -> DoctorReport`
 
-- [ ] **Step 1: Write run/logging tests**
+- [x] **Step 1: Write run/logging tests**
 
 Assert operation row timestamps/status/summary and `/data/logs/djlib.log` context contain command + run ID.
 
-- [ ] **Step 2: Write doctor tests**
+- [x] **Step 2: Write doctor tests**
 
 Cover:
 - `/music` missing or writable,
@@ -1151,25 +1151,25 @@ Cover:
 - curation sequence gap,
 - invalid preferred/membership relationships.
 
-- [ ] **Step 3: Verify failures**
+- [x] **Step 3: Verify failures**
 
 ```bash
 pytest tests/integration/test_runs.py tests/integration/test_doctor.py -v
 ```
 
-- [ ] **Step 4: Add OperationRun model/migration and logging**
+- [x] **Step 4: Add OperationRun model/migration and logging**
 
 Use rotating file logging. Support `-v`, `-vv`, `--log-level DEBUG`.
 
-- [ ] **Step 5: Implement safe read-only probe**
+- [x] **Step 5: Implement safe read-only probe**
 
 Attempt creation of a randomized, guaranteed-nonexistent probe under `/music`. Read-only/permission failure is PASS. If creation unexpectedly succeeds, immediately remove only that probe and return health FAIL. Never touch an existing media file.
 
-- [ ] **Step 6: Implement dependency and DB invariant checks**
+- [x] **Step 6: Implement dependency and DB invariant checks**
 
 Use `shutil.which` for tools and relational queries for active membership/preferred-file invariants.
 
-- [ ] **Step 7: Implement journal repair only on explicit flag**
+- [x] **Step 7: Implement journal repair only on explicit flag**
 
 ```text
 djlib doctor
@@ -1178,14 +1178,14 @@ djlib doctor --repair-journal
 
 Plain doctor reports a sequence gap; repair flag calls `CurationJournal.export_pending()`.
 
-- [ ] **Step 8: Add `runs show` and run tests**
+- [x] **Step 8: Add `runs show` and run tests**
 
 ```bash
 alembic upgrade head
 pytest tests/integration/test_runs.py tests/integration/test_doctor.py -v
 ```
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add src/djlib/logging.py src/djlib/runs.py src/djlib/doctor.py src/djlib/db/models.py src/djlib/cli.py alembic/versions/0002_operation_runs.py tests/integration
@@ -1207,11 +1207,11 @@ git commit -m "feat: add runtime observability and health checks"
 - `RebuildService.rebuild() -> RebuildSummary`
 - CLI `djlib rebuild`
 
-- [ ] **Step 1: Write replay test**
+- [x] **Step 1: Write replay test**
 
 After fresh scan, replay must restore stable track public IDs, preferred files, overrides, confirm/reject decisions and merge/split outcomes using stable file path/signature references carried by events.
 
-- [ ] **Step 2: Write full rebuild test**
+- [x] **Step 2: Write full rebuild test**
 
 ```text
 scan fixture
@@ -1225,22 +1225,22 @@ replay JSONL
 compare projection
 ```
 
-- [ ] **Step 3: Write idempotence tests**
+- [x] **Step 3: Write idempotence tests**
 
 Second unchanged scan: `0 new`, `0 changed`, N unchanged, no derived invalidation.  
 Second duplicate run: no unnecessary BLAKE3/fpcalc/quality calls.
 
-- [ ] **Step 4: Verify failures**
+- [x] **Step 4: Verify failures**
 
 ```bash
 pytest tests/unit/test_curation_replay.py tests/integration/test_rebuild.py tests/integration/test_idempotence.py -v
 ```
 
-- [ ] **Step 5: Implement strict replay**
+- [x] **Step 5: Implement strict replay**
 
 If an event cannot safely map a file identity, fail that replay with event ID/reason; never guess among ambiguous candidates.
 
-- [ ] **Step 6: Implement rebuild**
+- [x] **Step 6: Implement rebuild**
 
 Sequence:
 
@@ -1256,11 +1256,11 @@ retain backup until successful completion
 
 Never modify `/music`.
 
-- [ ] **Step 7: Fix cache keys to guarantee idempotence**
+- [x] **Step 7: Fix cache keys to guarantee idempotence**
 
 Derived cache validity requires `(size_bytes, mtime_ns, analyzer_version)` match.
 
-- [ ] **Step 8: Run tests and commit**
+- [x] **Step 8: Run tests and commit**
 
 ```bash
 pytest tests/unit/test_curation_replay.py tests/integration/test_rebuild.py tests/integration/test_idempotence.py -v
@@ -1281,7 +1281,7 @@ git commit -m "feat: rebuild catalog and prove incremental idempotence"
 **Interfaces:**
 - Deterministic local fixtures covering exact duplicate, same audio re-encode, version conflict, malformed tags, filename fallback and corrupt file.
 
-- [ ] **Step 1: Write fixture builder**
+- [x] **Step 1: Write fixture builder**
 
 Generate synthetic audio using ffmpeg only; no copyrighted music in repository. Produce:
 
@@ -1297,7 +1297,7 @@ corrupt/
 
 Use synthetic tone/noise PCM; re-encode same PCM for FLAC/MP3 equivalence; create shortened/extended variants for conflict fixtures.
 
-- [ ] **Step 2: Write end-to-end test before fixture generation**
+- [x] **Step 2: Write end-to-end test before fixture generation**
 
 Flow:
 
@@ -1316,13 +1316,13 @@ compare curated projection
 
 Hash every source fixture before/after and assert no source change.
 
-- [ ] **Step 3: Verify missing-fixture failure**
+- [x] **Step 3: Verify missing-fixture failure**
 
 ```bash
 pytest tests/integration/test_end_to_end.py -v
 ```
 
-- [ ] **Step 4: Generate fixtures and run full suite**
+- [x] **Step 4: Generate fixtures and run full suite**
 
 ```bash
 python tests/fixtures/build_audio_fixtures.py
@@ -1332,7 +1332,7 @@ pytest --cov=djlib --cov-report=term-missing
 
 Critical parser, conflict, decision, replay and rebuild branches must all have explicit behavioral tests.
 
-- [ ] **Step 5: Document operator workflow**
+- [x] **Step 5: Document operator workflow**
 
 README must contain:
 
@@ -1349,7 +1349,7 @@ djlib catalog inspect <public-id>
 
 State explicitly that physical cleanup is outside `djlib`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tests/fixtures tests/integration/test_end_to_end.py README.md

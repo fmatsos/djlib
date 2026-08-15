@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>djlib duplicate review</title>
+<style>
+{{ style_css | safe }}
+</style>
+</head>
+<body>
+<header class="toolbar">
+  <h1>Duplicate review</h1>
+  <span class="meta" id="report-meta"></span>
+  <div class="control">
+    <label for="filter-status">Status</label>
+    <select id="filter-status"></select>
+  </div>
+  <div class="control">
+    <label for="filter-confidence">Confidence</label>
+    <select id="filter-confidence"></select>
+  </div>
+  <div class="control">
+    <label for="filter-format">Format</label>
+    <select id="filter-format"></select>
+  </div>
+  <div class="control">
+    <label for="filter-decision">Decision state</label>
+    <select id="filter-decision"></select>
+  </div>
+  <div class="control">
+    <label for="sort-key">Sort by</label>
+    <select id="sort-key">
+      <option value="confidence">Confidence</option>
+      <option value="quality_delta">Quality delta</option>
+      <option value="members">Number of files</option>
+      <option value="path">Path</option>
+    </select>
+  </div>
+  <div class="control">
+    <label for="sort-dir">Order</label>
+    <select id="sort-dir">
+      <option value="desc">Descending</option>
+      <option value="asc">Ascending</option>
+    </select>
+  </div>
+  <label class="checkbox"><input type="checkbox" id="unresolved-only"> Unresolved only</label>
+  <button id="nav-prev" title="Previous group (k / ArrowUp)">&larr; Prev</button>
+  <button id="nav-next" title="Next group (j / ArrowDown)">Next &rarr;</button>
+  <button id="help-btn" title="Keyboard shortcuts (?)">Shortcuts</button>
+  <button id="export-btn" class="primary" title="Export decisions.json (e)">Export decisions.json</button>
+  <div class="overview-stats" id="overview-stats"></div>
+</header>
+<div class="layout">
+  <nav class="group-list" id="group-list"></nav>
+  <main class="detail" id="detail"></main>
+</div>
+
+<div class="help-overlay hidden" id="help-overlay">
+  <div class="help-box">
+    <h2>Keyboard shortcuts</h2>
+    <table>
+      <tr><td><kbd>j</kbd> / <kbd>&darr;</kbd></td><td>Next group</td></tr>
+      <tr><td><kbd>k</kbd> / <kbd>&uarr;</kbd></td><td>Previous group</td></tr>
+      <tr><td><kbd>u</kbd></td><td>Toggle unresolved-only</td></tr>
+      <tr><td><kbd>c</kbd></td><td>Confirm current group</td></tr>
+      <tr><td><kbd>r</kbd></td><td>Reject current group</td></tr>
+      <tr><td><kbd>d</kbd></td><td>Defer current group</td></tr>
+      <tr><td><kbd>1</kbd>-<kbd>9</kbd></td><td>Change preferred file to the Nth file shown</td></tr>
+      <tr><td><kbd>e</kbd></td><td>Export decisions.json</td></tr>
+      <tr><td><kbd>?</kbd></td><td>Toggle this help</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>Close this help</td></tr>
+    </table>
+    <button id="help-close">Close</button>
+  </div>
+</div>
+
+<script id="manifest-data" type="application/json">
+{{ manifest_json_escaped | safe }}
+</script>
+<script>
+window.MANIFEST = JSON.parse(document.getElementById('manifest-data').textContent);
+</script>
+<script>
+{{ app_js | safe }}
+</script>
+</body>
+</html>
