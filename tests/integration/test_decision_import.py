@@ -173,11 +173,18 @@ def test_confirm_decision_consolidates_group_and_records_curation_event(
         assert len(merged) == 1
         assert active[0].preferred_file_id is not None
 
-        events = list(session.execute(select(CurationEvent)).scalars())
-        assert len(events) == 1
-        assert events[0].sequence == 1
-        assert events[0].payload_json['group_id'] == group_id
-        assert events[0].payload_json['decision'] == 'CONFIRM'
+        # Two events land in the same transaction (Task 15 retrofit):
+        # `consolidate_group`'s internal `merge_track_into` call records its
+        # own TRACK_MERGE event first, then `_record_curation_event` records
+        # the DUPLICATE_GROUP_CONFIRMED decision itself -- both are real,
+        # independently replayable state changes.
+        events = sorted(
+            session.execute(select(CurationEvent)).scalars(), key=lambda e: e.sequence
+        )
+        assert len(events) == 2
+        assert [e.event_type for e in events] == ['TRACK_MERGE', 'DUPLICATE_GROUP_CONFIRMED']
+        assert events[1].payload_json['group_id'] == group_id
+        assert events[1].payload_json['decision'] == 'CONFIRM'
 
 
 def test_change_preferred_consolidates_using_the_human_selected_file(

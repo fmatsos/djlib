@@ -1207,11 +1207,11 @@ git commit -m "feat: add runtime observability and health checks"
 - `RebuildService.rebuild() -> RebuildSummary`
 - CLI `djlib rebuild`
 
-- [ ] **Step 1: Write replay test**
+- [x] **Step 1: Write replay test**
 
 After fresh scan, replay must restore stable track public IDs, preferred files, overrides, confirm/reject decisions and merge/split outcomes using stable file path/signature references carried by events.
 
-- [ ] **Step 2: Write full rebuild test**
+- [x] **Step 2: Write full rebuild test**
 
 ```text
 scan fixture
@@ -1225,22 +1225,22 @@ replay JSONL
 compare projection
 ```
 
-- [ ] **Step 3: Write idempotence tests**
+- [x] **Step 3: Write idempotence tests**
 
 Second unchanged scan: `0 new`, `0 changed`, N unchanged, no derived invalidation.  
 Second duplicate run: no unnecessary BLAKE3/fpcalc/quality calls.
 
-- [ ] **Step 4: Verify failures**
+- [x] **Step 4: Verify failures**
 
 ```bash
 pytest tests/unit/test_curation_replay.py tests/integration/test_rebuild.py tests/integration/test_idempotence.py -v
 ```
 
-- [ ] **Step 5: Implement strict replay**
+- [x] **Step 5: Implement strict replay**
 
 If an event cannot safely map a file identity, fail that replay with event ID/reason; never guess among ambiguous candidates.
 
-- [ ] **Step 6: Implement rebuild**
+- [x] **Step 6: Implement rebuild**
 
 Sequence:
 
@@ -1256,11 +1256,11 @@ retain backup until successful completion
 
 Never modify `/music`.
 
-- [ ] **Step 7: Fix cache keys to guarantee idempotence**
+- [x] **Step 7: Fix cache keys to guarantee idempotence**
 
 Derived cache validity requires `(size_bytes, mtime_ns, analyzer_version)` match.
 
-- [ ] **Step 8: Run tests and commit**
+- [x] **Step 8: Run tests and commit**
 
 ```bash
 pytest tests/unit/test_curation_replay.py tests/integration/test_rebuild.py tests/integration/test_idempotence.py -v

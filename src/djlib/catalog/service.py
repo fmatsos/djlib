@@ -2,7 +2,7 @@ import datetime as dt
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from djlib.db.enums import (
@@ -13,6 +13,7 @@ from djlib.db.enums import (
     TrackStatus,
 )
 from djlib.db.models import (
+    CurationEvent,
     DuplicateGroup,
     DuplicateGroupMember,
     FileFeaturedArtist,
@@ -30,9 +31,21 @@ from djlib.resolve.normalizer import normalize_identity
 # semantic identity fields also copied by `_copy_identity_from_file`.
 _OVERRIDABLE_FIELDS = frozenset({'artist', 'title', 'version', 'edition'})
 
+# `CurationEvent.event_type` string constants for the three curation-affecting
+# actions this service performs (Task 15 retrofit, design §25). Plain string
+# literals -- `CurationEvent.event_type` is not a native enum -- but the exact
+# spellings here must match `curation/replay.py`'s dispatch table byte-for-byte.
+EVENT_TYPE_TRACK_OVERRIDE_SET = 'TRACK_OVERRIDE_SET'
+EVENT_TYPE_TRACK_MERGE = 'TRACK_MERGE'
+EVENT_TYPE_TRACK_SPLIT = 'TRACK_SPLIT'
+
 
 def _now() -> dt.datetime:
     return dt.datetime.now(dt.UTC).replace(tzinfo=None)
+
+
+def _next_curation_sequence(session: Session) -> int:
+    return (session.execute(select(func.max(CurationEvent.sequence))).scalar_one() or 0) + 1
 
 
 @dataclass(frozen=True)
@@ -136,6 +149,23 @@ class CatalogService:
         override = TrackOverride(track_id=track.id, field=field, value_json={'value': value})
         self._session.add(override)
         self._session.flush()
+
+        # Anchored on the track's own currently-active file(s) rather than its
+        # public_id: a fresh rebuild's rescan assigns every track a brand-new
+        # random public_id (see `.claude/rules/curation-persistence.md` and
+        # `scan/service.py`), so `relative_path` is the only reference that
+        # still resolves to "this same track" after replay (design §25).
+        self._record_curation_event(
+            event_type=EVENT_TYPE_TRACK_OVERRIDE_SET,
+            track_public_id=track.public_id,
+            file_public_id=None,
+            payload={
+                'track_public_id': track.public_id,
+                'field': field,
+                'value': value,
+                'track_relative_paths': self._active_file_relative_paths(track.id),
+            },
+        )
         return override
 
     def merge_track_into(
@@ -166,11 +196,24 @@ class CatalogService:
         triggered `merge_tracks` both call this same method, so there is
         exactly one code path to reason about for merge correctness.
         """
-        absorbed_files = self._session.execute(
-            select(TrackFile).where(
-                TrackFile.track_id == absorbed.id, TrackFile.is_active.is_(True)
-            )
-        ).scalars()
+        absorbed_files = list(
+            self._session.execute(
+                select(TrackFile).where(
+                    TrackFile.track_id == absorbed.id, TrackFile.is_active.is_(True)
+                )
+            ).scalars()
+        )
+        absorbed_file_ids = [link.file_id for link in absorbed_files]
+
+        # Snapshot both sides' relative paths *before* the reassignment below
+        # -- once absorbed's links are repointed at survivor, a post-hoc query
+        # for "survivor's active files" would wrongly include the
+        # just-migrated files too, and replay needs these two sets kept
+        # disjoint to unambiguously re-find each side after a rebuild.
+        pre_merge_target_relative_paths = self._active_file_relative_paths(survivor.id)
+        pre_merge_source_relative_paths = self._active_file_relative_paths(absorbed.id)
+        file_relationships = self._relationships_by_relative_path(absorbed_file_ids, relationships)
+
         for link in absorbed_files:
             link.track_id = survivor.id
             link.relationship = relationships.get(link.file_id, RelationshipType.AUDIO_EQUIVALENT)
@@ -189,6 +232,20 @@ class CatalogService:
         )
         self._session.add(event)
         self._session.flush()
+
+        self._record_curation_event(
+            event_type=EVENT_TYPE_TRACK_MERGE,
+            track_public_id=survivor.public_id,
+            file_public_id=None,
+            payload={
+                'source_track_public_id': absorbed.public_id,
+                'target_track_public_id': survivor.public_id,
+                'source_file_relative_paths': pre_merge_source_relative_paths,
+                'target_file_relative_paths': pre_merge_target_relative_paths,
+                'file_relationships': file_relationships,
+                'decision_source': decision_source.value,
+            },
+        )
         return event
 
     def activate_track(self, track: Track, preferred_file_id: int | None = None) -> None:
@@ -303,6 +360,22 @@ class CatalogService:
         )
         self._session.add(event)
         self._session.flush()
+
+        # `remaining` is queried *after* the reassignment above so it reflects
+        # what actually stayed on `source`; `moved` comes straight from the
+        # already-resolved `files` list rather than a DB query, since those
+        # rows' `track_id` has already moved to `new_track` by this point.
+        self._record_curation_event(
+            event_type=EVENT_TYPE_TRACK_SPLIT,
+            track_public_id=new_track.public_id,
+            file_public_id=None,
+            payload={
+                'source_track_public_id': source.public_id,
+                'new_track_public_id': new_track.public_id,
+                'moved_file_relative_paths': sorted(file.relative_path for file in files),
+                'remaining_file_relative_paths': self._active_file_relative_paths(source.id),
+            },
+        )
         return new_track
 
     def _reject_groups_spanning_the_split(
@@ -384,6 +457,53 @@ class CatalogService:
         if missing:
             raise RuntimeError(f'no file(s) with public_id(s) {missing!r}')
         return [by_public_id[public_id] for public_id in public_ids]
+
+    def _active_file_relative_paths(self, track_id: int) -> list[str]:
+        return sorted(
+            self._session.execute(
+                select(FileRecord.relative_path)
+                .join(TrackFile, TrackFile.file_id == FileRecord.id)
+                .where(TrackFile.track_id == track_id, TrackFile.is_active.is_(True))
+            ).scalars()
+        )
+
+    def _relationships_by_relative_path(
+        self, file_ids: list[int], relationships: dict[int, RelationshipType]
+    ) -> dict[str, str]:
+        if not file_ids:
+            return {}
+        rows = self._session.execute(
+            select(FileRecord.id, FileRecord.relative_path).where(FileRecord.id.in_(file_ids))
+        ).all()
+        return {
+            relative_path: relationships.get(file_id, RelationshipType.AUDIO_EQUIVALENT).value
+            for file_id, relative_path in rows
+        }
+
+    def _record_curation_event(
+        self,
+        event_type: str,
+        track_public_id: str | None,
+        file_public_id: str | None,
+        payload: dict,
+    ) -> CurationEvent:
+        """Insert one `CurationEvent` row in the *same* transaction as the
+        state change it represents (design §25, `.claude/rules/
+        curation-persistence.md`). Never appended to `events.jsonl` here --
+        that is `CurationJournal.export_pending()`'s job, as a deliberately
+        separate, retriable step.
+        """
+        event = CurationEvent(
+            sequence=_next_curation_sequence(self._session),
+            event_uuid=str(uuid.uuid4()),
+            event_type=event_type,
+            track_public_id=track_public_id,
+            file_public_id=file_public_id,
+            payload_json=payload,
+        )
+        self._session.add(event)
+        self._session.flush()
+        return event
 
     def _copy_identity_from_file(self, track: Track, file: FileRecord) -> None:
         track.artist = file.resolved_artist
