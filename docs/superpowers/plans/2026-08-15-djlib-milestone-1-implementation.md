@@ -358,7 +358,7 @@ git commit -m "feat: add catalog database schema and migrations"
 - `discover_audio_files(root: Path) -> Iterator[DiscoveredFile]`
 - `ScanService.scan(full: bool = False) -> ScanSummary`
 
-- [ ] **Step 1: Write discovery test**
+- [x] **Step 1: Write discovery test**
 
 ```python
 def test_discovers_only_supported_audio(tmp_path):
@@ -368,17 +368,17 @@ def test_discovers_only_supported_audio(tmp_path):
     assert [x.relative_path for x in discover_audio_files(tmp_path)] == ['a.mp3', 'b.flac']
 ```
 
-- [ ] **Step 2: Write NEW/UNCHANGED/CHANGED/MISSING integration test**
+- [x] **Step 2: Write NEW/UNCHANGED/CHANGED/MISSING integration test**
 
 Run four scans while creating, preserving, modifying and deleting a fixture; assert counters and `is_present` behavior.
 
-- [ ] **Step 3: Verify failures**
+- [x] **Step 3: Verify failures**
 
 ```bash
 pytest tests/unit/test_scanner.py tests/integration/test_scan.py -v
 ```
 
-- [ ] **Step 4: Implement deterministic cheap discovery**
+- [x] **Step 4: Implement deterministic cheap discovery**
 
 Supported extensions:
 
@@ -388,7 +388,7 @@ Supported extensions:
 
 Discovery reads only path/stat information and sorts relative paths.
 
-- [ ] **Step 5: Implement scan lifecycle**
+- [x] **Step 5: Implement scan lifecycle**
 
 Rules:
 
@@ -401,17 +401,17 @@ unseen after successful discovery -> is_present=false
 
 Never mark missing after an aborted discovery pass.
 
-- [ ] **Step 6: Add `djlib scan [--full]`**
+- [x] **Step 6: Add `djlib scan [--full]`**
 
 Print seen/new/changed/unchanged/missing/failed counts and scan public ID.
 
-- [ ] **Step 7: Run tests**
+- [x] **Step 7: Run tests**
 
 ```bash
 pytest tests/unit/test_scanner.py tests/integration/test_scan.py -v
 ```
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add src/djlib/scan src/djlib/cli.py tests/unit/test_scanner.py tests/integration/test_scan.py
