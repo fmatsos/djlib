@@ -510,11 +510,11 @@ git commit -m "feat: extract audio tags and technical metadata"
 - `split_featured_artists(artist: str) -> FeaturedArtistParse`
 - `MetadataResolver.resolve(file_name, raw) -> ResolvedMetadata`
 
-- [ ] **Step 1: Write normalization tests**
+- [x] **Step 1: Write normalization tests**
 
 Cover Unicode canonicalization, casefold, typographic dash/quote normalization, whitespace collapse, while retaining meaningful `&`, `+`, `vs.`, `pres.`.
 
-- [ ] **Step 2: Write filename tests**
+- [x] **Step 2: Write filename tests**
 
 Must parse:
 
@@ -528,21 +528,21 @@ Artist - Title (Version).ext
 
 Must not invent artist/title from ambiguous `Acid Track Final New 2.flac`.
 
-- [ ] **Step 3: Write version/edition tests**
+- [x] **Step 3: Write version/edition tests**
 
 Cover Remix, Mix, Original Mix, Extended Mix, Radio Edit, Club Mix, Re-edit, Rework, Bootleg, Mashup, VIP, Dub, Instrumental, Live, and separate Remaster/Anniversary/Deluxe/Reissue editions.
 
-- [ ] **Step 4: Write featuring tests**
+- [x] **Step 4: Write featuring tests**
 
 Cover `feat.`, `ft.`, `featuring`; preserve ordered featured artists.
 
-- [ ] **Step 5: Verify failures**
+- [x] **Step 5: Verify failures**
 
 ```bash
 pytest tests/unit/test_normalizer.py tests/unit/test_filename_parser.py tests/unit/test_version_parser.py tests/unit/test_featured_artists.py -v
 ```
 
-- [ ] **Step 6: Implement resolver priority**
+- [x] **Step 6: Implement resolver priority**
 
 ```python
 resolved = valid_tag or conservative_filename_value or None
@@ -551,11 +551,11 @@ source = 'TAG' if valid_tag else 'FILENAME' if conservative_filename_value else 
 
 Raw values remain untouched.
 
-- [ ] **Step 7: Integrate resolver after metadata extraction**
+- [x] **Step 7: Integrate resolver after metadata extraction**
 
 Persist resolved artist/title/version/edition and file-level featured artists.
 
-- [ ] **Step 8: Run tests and commit**
+- [x] **Step 8: Run tests and commit**
 
 ```bash
 pytest tests/unit/test_normalizer.py tests/unit/test_filename_parser.py tests/unit/test_version_parser.py tests/unit/test_featured_artists.py -v

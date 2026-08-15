@@ -2,15 +2,18 @@ import datetime as dt
 from dataclasses import dataclass
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from djlib.config import DjlibConfig
 from djlib.db.enums import ScanStatus
-from djlib.db.models import FileRecord, ScanRun
+from djlib.db.models import FileFeaturedArtist, FileRecord, ScanRun
 from djlib.ids import new_public_id
 from djlib.metadata.extractor import MetadataExtractor, ensure_required_executables
 from djlib.metadata.types import ExtractedMetadata, MetadataExtractionError
+from djlib.resolve.normalizer import normalize_identity
+from djlib.resolve.resolver import MetadataResolver
+from djlib.resolve.types import RawIdentity
 from djlib.scan.scanner import discover_audio_files
 
 SCANNER_VERSION = '1'
@@ -43,6 +46,7 @@ class ScanService:
         self._config = config
         self._session_maker = session_maker
         self._metadata_extractor = metadata_extractor or MetadataExtractor.create()
+        self._resolver = MetadataResolver()
 
     def scan(self, full: bool = False) -> ScanSummary:
         ensure_required_executables()
@@ -100,6 +104,7 @@ class ScanService:
                         failed_paths.append(item.relative_path)
                     else:
                         _apply_metadata(record, extracted, now)
+                        self._apply_resolution(session, record)
 
             for relative_path, record in existing.items():
                 if relative_path not in seen_paths:
@@ -133,6 +138,35 @@ class ScanService:
                 files_unchanged=run.files_unchanged,
                 files_missing=run.files_missing,
                 files_failed=run.files_failed,
+            )
+
+    def _apply_resolution(self, session: Session, record: FileRecord) -> None:
+        file_name = Path(record.relative_path).name
+        resolved = self._resolver.resolve(
+            file_name, RawIdentity(artist=record.artist_raw, title=record.title_raw)
+        )
+
+        record.resolved_artist = resolved.artist.value
+        record.artist_source = resolved.artist.source
+        record.resolved_title = resolved.title.value
+        record.title_source = resolved.title.source
+        record.resolved_version = resolved.version.value
+        record.version_source = resolved.version.source
+        record.resolved_edition = resolved.edition.value
+        record.edition_source = resolved.edition.source
+
+        if record.id is None:
+            session.flush()
+        session.execute(delete(FileFeaturedArtist).where(FileFeaturedArtist.file_id == record.id))
+        for entry in resolved.featured_artists:
+            session.add(
+                FileFeaturedArtist(
+                    file_id=record.id,
+                    position=entry.position,
+                    name=entry.name,
+                    normalized_name=normalize_identity(entry.name),
+                    source=entry.source,
+                )
             )
 
 
