@@ -9,6 +9,14 @@
 # Run as root on the Proxmox VE host. Safe to re-run: an existing container
 # with the same CTID is reused and only updated, never recreated.
 #
+# Remote install, no local clone needed (like the Proxmox community
+# scripts): this script fetches its sibling helpers (configure-mounts.sh,
+# bootstrap.sh, install-djlib.sh) straight from GitHub when they aren't
+# found next to it, so a bare curl + bash is enough:
+#
+#   CTID=200 MUSIC_SRC=/mnt/tank/djing DATA_SRC=/mnt/tank/djlib \
+#     bash -c "$(curl -fsSL https://raw.githubusercontent.com/fmatsos/djlib/main/infra/lxc/create-container.sh)"
+#
 # Configuration is via environment variables, all optional except CTID:
 #   CTID             container ID (required)
 #   HOSTNAME         container hostname                 (default: djlib)
@@ -28,9 +36,13 @@
 #   DATA_SRC         host path for djlib state              (default: /mnt/tank/djlib)
 #   DJLIB_REPO_URL   git remote to install djlib from
 #                    (default: https://github.com/fmatsos/djlib.git)
-#   DJLIB_REPO_REF   git ref (branch/tag) to install        (default: main)
+#   DJLIB_REPO_REF   git ref (branch/tag) to install, and to fetch this
+#                    script's own siblings from when run remotely
+#                    (default: main)
+#   DJLIB_RAW_BASE   raw-content base URL used to fetch missing siblings
+#                    (default: https://raw.githubusercontent.com/fmatsos/djlib)
 #
-# Example:
+# Example (repo already cloned locally):
 #   CTID=200 MUSIC_SRC=/mnt/tank/djing DATA_SRC=/mnt/tank/djlib \
 #     ./infra/lxc/create-container.sh
 set -Eeuo pipefail
@@ -50,7 +62,8 @@ MUSIC_SRC="${MUSIC_SRC:-/mnt/tank/djing}"
 DATA_SRC="${DATA_SRC:-/mnt/tank/djlib}"
 DJLIB_REPO_URL="${DJLIB_REPO_URL:-https://github.com/fmatsos/djlib.git}"
 DJLIB_REPO_REF="${DJLIB_REPO_REF:-main}"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DJLIB_RAW_BASE="${DJLIB_RAW_BASE:-https://raw.githubusercontent.com/fmatsos/djlib}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd || true)"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "error: run as root on the Proxmox VE host" >&2
@@ -60,6 +73,34 @@ command -v pct >/dev/null 2>&1 || {
   echo "error: pct not found -- run this on a Proxmox VE host" >&2
   exit 1
 }
+
+# Allocated unconditionally (cheap) rather than lazily: fetch_or_local runs
+# inside a `$(...)` command substitution, i.e. a subshell, so it cannot
+# populate this path lazily for the parent shell's cleanup trap to see.
+FETCH_TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$FETCH_TMP_DIR"' EXIT
+
+# Resolves the path to a sibling helper script: next to this script when run
+# from a local clone, otherwise fetched from GitHub (so this script also
+# works piped straight into bash, with no local clone at all).
+fetch_or_local() {
+  local name="$1"
+  if [ -n "$SCRIPT_DIR" ] && [ -r "$SCRIPT_DIR/$name" ]; then
+    printf '%s\n' "$SCRIPT_DIR/$name"
+    return
+  fi
+  command -v curl >/dev/null 2>&1 || {
+    echo "error: curl not found -- required to fetch $name remotely" >&2
+    exit 1
+  }
+  curl -fsSL "$DJLIB_RAW_BASE/$DJLIB_REPO_REF/infra/lxc/$name" -o "$FETCH_TMP_DIR/$name"
+  chmod +x "$FETCH_TMP_DIR/$name"
+  printf '%s\n' "$FETCH_TMP_DIR/$name"
+}
+
+CONFIGURE_MOUNTS="$(fetch_or_local configure-mounts.sh)"
+BOOTSTRAP="$(fetch_or_local bootstrap.sh)"
+INSTALL_DJLIB="$(fetch_or_local install-djlib.sh)"
 
 if [ ! -d "$MUSIC_SRC" ]; then
   echo "error: MUSIC_SRC ($MUSIC_SRC) does not exist -- point it at the source DJ archive" >&2
@@ -95,7 +136,7 @@ else
     --onboot 1
 fi
 
-"$SCRIPT_DIR/configure-mounts.sh" "$CTID"
+"$CONFIGURE_MOUNTS" "$CTID"
 
 pct start "$CTID"
 
@@ -105,8 +146,8 @@ for _ in $(seq 1 30); do
   sleep 2
 done
 
-pct push "$CTID" "$SCRIPT_DIR/bootstrap.sh" /root/bootstrap.sh --perms 0755
-pct push "$CTID" "$SCRIPT_DIR/install-djlib.sh" /root/install-djlib.sh --perms 0755
+pct push "$CTID" "$BOOTSTRAP" /root/bootstrap.sh --perms 0755
+pct push "$CTID" "$INSTALL_DJLIB" /root/install-djlib.sh --perms 0755
 
 pct exec "$CTID" -- bash -c 'apt-get update && apt-get -y upgrade'
 pct exec "$CTID" -- /root/bootstrap.sh
