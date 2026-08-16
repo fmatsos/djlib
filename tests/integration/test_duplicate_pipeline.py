@@ -5,10 +5,18 @@ from blake3 import blake3
 from sqlalchemy import Engine, select
 
 from djlib.config import DjlibConfig
-from djlib.db.enums import DuplicateStatus, IdentityEventType, PairClassification, TrackStatus
-from djlib.db.models import DuplicateGroup, Track, TrackFile, TrackIdentityEvent
+from djlib.db.enums import (
+    DecisionSource,
+    DuplicateStatus,
+    IdentityEventType,
+    PairClassification,
+    RelationshipType,
+    TrackStatus,
+)
+from djlib.db.models import DuplicateGroup, FileRecord, Track, TrackFile, TrackIdentityEvent
 from djlib.db.session import session_factory
 from djlib.duplicates.service import DuplicateService
+from djlib.ids import new_public_id
 from djlib.scan.service import ScanService
 
 
@@ -166,3 +174,68 @@ def test_review_required_group_pair_evidence_is_conflict(
 
     assert stats.group_status_counts[DuplicateStatus.REVIEW_REQUIRED.value] == 1
     assert stats.pair_classification_counts[PairClassification.CONFLICT.value] == 1
+
+
+def _add_present_file_with_track(
+    session, relative_path: str, *, artist: str, title: str, duration_ms: int
+) -> FileRecord:
+    """A minimal present `FileRecord` + provisional `Track`, bypassing the real
+    scanner/metadata-extraction pipeline (no `exiftool`/`ffprobe` involved) --
+    enough for `DuplicateService.detect()`'s blocking-only pass, which never
+    touches audio content at all.
+    """
+    file = FileRecord(
+        public_id=new_public_id('fil'),
+        relative_path=relative_path,
+        size_bytes=1000,
+        mtime_ns=1,
+        extension='.flac',
+        is_present=True,
+        duration_ms=duration_ms,
+    )
+    session.add(file)
+    session.flush()
+
+    normalized = artist.strip().casefold()
+    track = Track(
+        public_id=new_public_id('trk'),
+        status=TrackStatus.PROVISIONAL,
+        artist=artist,
+        title=title,
+        artist_normalized=normalized,
+        title_normalized=title.strip().casefold(),
+        duration_reference_ms=duration_ms,
+    )
+    session.add(track)
+    session.flush()
+
+    session.add(
+        TrackFile(
+            track_id=track.id,
+            file_id=file.id,
+            relationship=RelationshipType.PRIMARY,
+            decision_source=DecisionSource.AUTOMATIC,
+            is_active=True,
+        )
+    )
+    session.flush()
+    return file
+
+
+def test_detect_reports_progress_per_present_file(config: DjlibConfig, engine: Engine) -> None:
+    session_maker = session_factory(engine)
+    with session_maker() as session:
+        _add_present_file_with_track(
+            session, 'a.flac', artist='Artist', title='Track', duration_ms=200_000
+        )
+        _add_present_file_with_track(
+            session, 'b.flac', artist='Artist', title='Track', duration_ms=200_100
+        )
+        session.commit()
+
+        calls: list[tuple[str, int, int]] = []
+        DuplicateService(config, session).detect(
+            progress=lambda stage, current, total: calls.append((stage, current, total))
+        )
+
+    assert calls == [('detecting', 1, 2), ('detecting', 2, 2)]

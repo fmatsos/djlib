@@ -1,10 +1,12 @@
 import json
 import os
 import sys
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import typer
+from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn, TimeElapsedColumn
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -46,6 +48,7 @@ from djlib.duplicates.quality import QualityResult
 from djlib.duplicates.service import DuplicateService
 from djlib.logging import configure_logging
 from djlib.metadata.types import SubprocessCommandRunner
+from djlib.progress import ProgressReporter
 from djlib.report.generator import ReportGenerator
 from djlib.runs import operation_run
 from djlib.scan.service import ScanService
@@ -85,15 +88,37 @@ def _load_config() -> DjlibConfig:
     return DjlibConfig.load(Path(config_path)) if config_path else DjlibConfig.defaults()
 
 
+@contextmanager
+def _progress_bar() -> Iterator[ProgressReporter]:
+    """A single reusable progress bar shared across a command's stages.
+
+    Reports a stage name and a current/total count -- never a file path
+    (`scan`/`duplicates run`/`rebuild` can touch thousands of files, and a
+    scrolling wall of full paths is more noise than signal in a terminal).
+    """
+    with Progress(
+        TextColumn('[progress.description]{task.description}'),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeElapsedColumn(),
+    ) as bar:
+        task_id = bar.add_task('starting...', total=None)
+
+        def report(stage: str, current: int, total: int) -> None:
+            bar.update(task_id, description=stage, completed=current, total=total or None)
+
+        yield report
+
+
 @app.command()
 def scan(full: bool = typer.Option(False, '--full', help='Force a full rescan.')) -> None:
     """Scan music_root and incrementally update the catalogue."""
     config = _load_config()
     engine = create_engine_for_config(config)
     session_maker = session_factory(engine)
-    with operation_run(session_maker, 'scan', 'scan') as run:
+    with operation_run(session_maker, 'scan', 'scan') as run, _progress_bar() as progress:
         service = ScanService(config, session_maker)
-        summary = service.scan(full=full)
+        summary = service.scan(full=full, progress=progress)
         run.summary = {
             'scan_public_id': summary.public_id,
             'status': summary.status.value,
@@ -124,7 +149,8 @@ def rebuild() -> None:
     """
     config = _load_config()
     try:
-        summary = RebuildService(config).rebuild()
+        with _progress_bar() as progress:
+            summary = RebuildService(config).rebuild(progress=progress)
     except RebuildError as exc:
         typer.echo(f'rebuild: aborted: {exc}', err=True)
         raise typer.Exit(code=1) from exc
@@ -270,9 +296,9 @@ def duplicates_run() -> None:
     config = _load_config()
     engine = create_engine_for_config(config)
     session_maker = session_factory(engine)
-    with operation_run(session_maker, 'duplicates run', 'dup') as run:
+    with operation_run(session_maker, 'duplicates run', 'dup') as run, _progress_bar() as progress:
         with session_maker() as session:
-            summary = DuplicateService(config, session).run()
+            summary = DuplicateService(config, session).run(progress=progress)
         run.summary = {
             'groups_detected': summary.groups_detected,
             'groups_analyzed': summary.groups_analyzed,
