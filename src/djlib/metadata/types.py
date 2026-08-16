@@ -11,7 +11,13 @@ class CommandRunner(Protocol):
 
 class SubprocessCommandRunner:
     def run(self, argv: Sequence[str]) -> CompletedProcess[str]:
-        return subprocess.run(list(argv), check=False, capture_output=True, text=True)
+        # ffmpeg/exiftool/ffprobe echo arbitrary source-file text (e.g. a
+        # filename or embedded tag in a non-UTF-8 encoding) to stdout/stderr;
+        # strict decoding would crash a duplicate-analysis run on the first
+        # such byte, so replace undecodable bytes instead of raising.
+        return subprocess.run(
+            list(argv), check=False, capture_output=True, text=True, errors='replace'
+        )
 
 
 class MetadataExtractionError(Exception):
