@@ -1,15 +1,18 @@
+import datetime as dt
 import json
 import os
 import sys
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Protocol, TextIO, TypeVar
 
 import typer
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn, TimeElapsedColumn
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from djlib.catalog.export import collect_catalog_export_rows, write_catalog_csv, write_catalog_html
 from djlib.catalog.queries import (
     active_files_for_track,
     active_track_for_file,
@@ -18,18 +21,17 @@ from djlib.catalog.queries import (
     find_track_by_public_id,
 )
 from djlib.catalog.service import CatalogService, EffectiveIdentity
+from djlib.catalog.stats_export import collect_stats_export_rows, write_stats_csv, write_stats_html
 from djlib.config import DjlibConfig
 from djlib.curation.decisions import DecisionImportError, DecisionImporter
 from djlib.curation.journal import CurationJournal
 from djlib.curation.rebuild import RebuildError, RebuildService
 from djlib.db.engine import create_engine_for_config
-from djlib.db.enums import PairClassification
 from djlib.db.models import (
     CurationEvent,
     DuplicateGroup,
     DuplicateGroupMember,
     DuplicatePairEvidence,
-    FileQualityAnalysis,
     FileRecord,
     OperationRun,
     Track,
@@ -42,10 +44,15 @@ from djlib.duplicates.calibration import (
     write_calibration_json,
 )
 from djlib.duplicates.chromaprint import ChromaprintService
+from djlib.duplicates.export import (
+    collect_duplicate_export_rows,
+    write_duplicates_csv,
+    write_duplicates_html,
+)
 from djlib.duplicates.hashing import HashService
-from djlib.duplicates.preferred import PreferredCandidate, PreferredChoice, PreferredFileSelector
-from djlib.duplicates.quality import QualityResult
+from djlib.duplicates.rationale import group_reasons, preferred_choice_from_persisted
 from djlib.duplicates.service import DuplicateService
+from djlib.export.formats import ExportFormat, default_export_path
 from djlib.logging import configure_logging
 from djlib.metadata.types import SubprocessCommandRunner
 from djlib.progress import ProgressReporter
@@ -53,21 +60,57 @@ from djlib.report.generator import ReportGenerator
 from djlib.runs import operation_run
 from djlib.scan.service import ScanService
 
-# Mirrors `duplicates/groups.py::DuplicateGroupBuilder`'s own inconsistency
-# set (design Sec.16) -- kept as a small local copy here rather than importing
-# a private name across module boundaries, the same judgment call
-# `report/generator.py::_group_reasons` already made for the same reason.
-_INCONSISTENT_CLASSIFICATIONS = frozenset(
-    {PairClassification.DIFFERENT, PairClassification.CONFLICT}
-)
-
 app = typer.Typer(no_args_is_help=True, help='Local DJ-library catalogue and deduplication tool.')
 catalog_app = typer.Typer(no_args_is_help=True, help='Inspect the catalogue.')
 duplicates_app = typer.Typer(no_args_is_help=True, help='Duplicate-detection utilities.')
+stats_app = typer.Typer(no_args_is_help=True, help='Combined catalogue/duplicate statistics export.')
 runs_app = typer.Typer(no_args_is_help=True, help='Inspect operation runs.')
 app.add_typer(catalog_app, name='catalog')
 app.add_typer(duplicates_app, name='duplicates')
+app.add_typer(stats_app, name='stats')
 app.add_typer(runs_app, name='runs')
+
+_ExportRow = TypeVar('_ExportRow')
+
+
+class _CsvWriter(Protocol[_ExportRow]):
+    def __call__(self, rows: Sequence[_ExportRow], stream: TextIO) -> None: ...
+
+
+class _HtmlWriter(Protocol[_ExportRow]):
+    def __call__(self, rows: Sequence[_ExportRow], generated_at: str, stream: TextIO) -> None: ...
+
+
+def _emit_export(
+    rows: Sequence[_ExportRow],
+    fmt: ExportFormat,
+    output: Path | None,
+    config: DjlibConfig,
+    name: str,
+    write_csv: '_CsvWriter[_ExportRow]',
+    write_html: '_HtmlWriter[_ExportRow]',
+) -> None:
+    """Shared write rule for every plain `* export` command (design: CSV to
+    stdout by default, HTML always to a file -- see `docs/commandes.md`).
+    Mirrors `duplicates_calibrate`'s existing stdout/`--output` shape for CSV
+    and `duplicates_report`'s existing "always writes a file, echoes the
+    path" shape for HTML, rather than reintroducing either pattern per command.
+    """
+    if output is None and fmt == ExportFormat.CSV:
+        write_csv(rows, sys.stdout)
+        typer.echo(f'{name} export: rows={len(rows)}', err=True)
+        return
+
+    now = dt.datetime.now(dt.UTC)
+    path = output if output is not None else default_export_path(config.data_root, name, fmt, now)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if fmt == ExportFormat.CSV:
+        with path.open('w', newline='') as handle:
+            write_csv(rows, handle)
+    else:
+        with path.open('w', encoding='utf-8') as handle:
+            write_html(rows, now.isoformat(), handle)
+    typer.echo(str(path))
 
 
 @app.callback()
@@ -256,6 +299,26 @@ def duplicates_calibrate(
     typer.echo(f'calibrate: pairs={len(rows)}', err=True)
 
 
+@duplicates_app.command('export')
+def duplicates_export(
+    format: ExportFormat = typer.Option(ExportFormat.CSV, '--format', help='csv (default) or html.'),
+    output: Path | None = typer.Option(
+        None, '--output', help='Write to this path instead of the default.'
+    ),
+) -> None:
+    """Export duplicate groups as flat, read-only data -- one row per group
+    (status, confidence, member paths, proposed preferred file, rationale).
+    Unlike `duplicates report` (an interactive HTML review workflow feeding
+    `duplicates import-decisions`), this never writes a manifest and has no
+    review/decision concept at all -- just a dump of current group state.
+    """
+    config = _load_config()
+    engine = create_engine_for_config(config)
+    with session_factory(engine)() as session:
+        rows = collect_duplicate_export_rows(session)
+    _emit_export(rows, format, output, config, 'duplicates', write_duplicates_csv, write_duplicates_html)
+
+
 @duplicates_app.command('detect')
 def duplicates_detect() -> None:
     """Conservative metadata blocking only (design §14) -- no BLAKE3, no
@@ -407,6 +470,39 @@ def catalog_stats() -> None:
     )
 
 
+@catalog_app.command('export')
+def catalog_export(
+    format: ExportFormat = typer.Option(ExportFormat.CSV, '--format', help='csv (default) or html.'),
+    output: Path | None = typer.Option(
+        None, '--output', help='Write to this path instead of the default.'
+    ),
+) -> None:
+    """Export the full catalogue -- one row per file plus its resolved track identity."""
+    config = _load_config()
+    engine = create_engine_for_config(config)
+    with session_factory(engine)() as session:
+        rows = collect_catalog_export_rows(session)
+    _emit_export(rows, format, output, config, 'catalog', write_catalog_csv, write_catalog_html)
+
+
+@stats_app.command('export')
+def stats_export(
+    format: ExportFormat = typer.Option(ExportFormat.CSV, '--format', help='csv (default) or html.'),
+    output: Path | None = typer.Option(
+        None, '--output', help='Write to this path instead of the default.'
+    ),
+) -> None:
+    """Export combined catalogue + duplicate-detection statistics (the same
+    counts `catalog stats`/`duplicates stats` print to the terminal) as a
+    flat category/metric/value table.
+    """
+    config = _load_config()
+    engine = create_engine_for_config(config)
+    with session_factory(engine)() as session:
+        rows = collect_stats_export_rows(session, config)
+    _emit_export(rows, format, output, config, 'stats', write_stats_csv, write_stats_html)
+
+
 @catalog_app.command('inspect')
 def catalog_inspect(
     public_id: str = typer.Argument(..., help='A fil_... or trk_... public ID.'),
@@ -474,69 +570,6 @@ def _print_effective_identity(identity: EffectiveIdentity) -> None:
         typer.echo(f'featured artists: {featured}')
 
 
-def _quality_result_from_row(row: FileQualityAnalysis) -> QualityResult:
-    """A small local copy of `report/generator.py::_quality_result_from_row`
-    (reconstructing a `QualityResult` from an already-persisted row, so this
-    never re-invokes ffmpeg/fpcalc from a read-only inspect command) -- kept
-    as its own copy across the module boundary for the same reason that
-    module's own docstring gives for not sharing its private helpers.
-    """
-    details = row.details_json or {}
-    return QualityResult(
-        integrity_ok=row.integrity_status == 'OK',
-        lossless=row.lossless_status == 'LOSSLESS',
-        transcode_suspicion=row.transcode_suspicion,
-        clipping_detected=row.clipping_status == 'CLIPPED',
-        audio_quality_score=details.get('audio_quality_score', 0.0),
-        metadata_completeness=details.get('metadata_completeness', 0.0),
-        quality_score=row.quality_score if row.quality_score is not None else 0.0,
-        details=details,
-    )
-
-
-def _group_reasons(pair_rows: list[DuplicatePairEvidence]) -> list[str]:
-    """A small local copy of `report/generator.py::_group_reasons` (design
-    Sec.16's own group-status rationale, mirrored read-only for display)."""
-    classifications = {row.classification for row in pair_rows}
-    if classifications & _INCONSISTENT_CLASSIFICATIONS:
-        return [
-            'conflicting or contradictory pairwise evidence within this group '
-            '(design Sec.16: never rely on naive transitive closure)'
-        ]
-    if PairClassification.PROBABLE in classifications:
-        return [
-            'at least one PROBABLE pair -- plausible but not confident enough '
-            'for automatic consolidation'
-        ]
-    if classifications:
-        return ['every pairwise classification in this group is EXACT or AUDIO_EQUIVALENT']
-    return ['no pairwise evidence available (fewer than two analyzed files)']
-
-
-def _preferred_choice_among(
-    session: Session, files: Iterable[FileRecord]
-) -> PreferredChoice | None:
-    """Reconstructs preferred-file rationale from already-persisted
-    `FileQualityAnalysis` rows only -- never re-runs quality analysis from a
-    read-only inspect command (same "recomputed, not re-run" judgment call as
-    `report/generator.py`).
-    """
-    candidates: list[PreferredCandidate] = []
-    for file in files:
-        row = session.execute(
-            select(FileQualityAnalysis)
-            .where(FileQualityAnalysis.file_id == file.id)
-            .order_by(FileQualityAnalysis.id.desc())
-            .limit(1)
-        ).scalar_one_or_none()
-        if row is None:
-            continue
-        candidates.append(PreferredCandidate(file_id=file.id, quality=_quality_result_from_row(row)))
-    if not candidates:
-        return None
-    return PreferredFileSelector().choose(candidates)
-
-
 def _print_duplicate_context(session: Session, track: Track) -> None:
     """Shows duplicate relationships/evidence, preferred-file rationale and
     human decision provenance for `track` (design Sec.33's literal `catalog
@@ -584,7 +617,7 @@ def _print_duplicate_context(session: Session, track: Track) -> None:
                 select(DuplicatePairEvidence).where(DuplicatePairEvidence.group_id == group.id)
             ).scalars()
         )
-        for reason in _group_reasons(pair_rows):
+        for reason in group_reasons(pair_rows):
             typer.echo(f'  reason: {reason}')
         for pair in pair_rows:
             left = member_files.get(pair.left_file_id)
@@ -598,7 +631,7 @@ def _print_duplicate_context(session: Session, track: Track) -> None:
             for reason in (pair.evidence_json or {}).get('reasons', []):
                 typer.echo(f'    - {reason}')
 
-        choice = _preferred_choice_among(session, member_files.values())
+        choice = preferred_choice_from_persisted(session, member_files.values())
         if choice is not None and choice.file_id in member_files:
             typer.echo(f'  preferred file: {member_files[choice.file_id].public_id}')
             for reason in choice.reasons:
