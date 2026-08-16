@@ -1,53 +1,176 @@
 # djlib
 
-A local, deterministic, read-only-over-source CLI for cataloguing a DJ music
-archive and detecting exact/audio-equivalent duplicate files.
+*Un catalogue local et déterministe pour une archive DJ, qui détecte les
+doublons sans jamais toucher aux fichiers sources.*
 
-`djlib` is designed to run inside a dedicated Proxmox LXC container that
-mounts the source archive read-only as `/music` and a writable state
-directory as `/data`. It never renames, moves, deletes or retags files under
-`/music`.
+---
 
-See `docs/superpowers/specs/2026-08-15-djlib-milestone-1-catalog-dedup-design.md`
-for the full Milestone 1 design and
-`docs/superpowers/plans/2026-08-15-djlib-milestone-1-implementation.md` for
-the implementation plan.
+## Sommaire
 
-## Status
+- [Qu'est-ce que djlib ?](#quest-ce-que-djlib-)
+- [Comment ça fonctionne](#comment-ça-fonctionne)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Les commandes](#les-commandes)
+- [Aller plus loin](#aller-plus-loin)
+- [Développement](#développement)
 
-Milestone 1 (catalogue + exact/audio-equivalent duplicate detection) is
-complete: incremental scanning, metadata extraction/resolution, provisional
-tracks, duplicate blocking/hashing/Chromaprint/quality analysis/
-classification/consolidation, human duplicate review (static HTML report +
-decision import), track overrides/merge/split, a durable curation journal,
-`djlib doctor` health checks, and a proven full-catalogue rebuild. See
-`docs/superpowers/specs/2026-08-15-djlib-milestone-1-catalog-dedup-design.md`
-for the design and
-`docs/superpowers/plans/2026-08-15-djlib-milestone-1-implementation.md` for
-the task-by-task implementation history.
+## Qu'est-ce que djlib ?
+
+Après des années de mix, une archive DJ finit toujours par ressembler à
+ça : des dizaines de milliers de fichiers audio, collectés au fil du temps
+sur différents supports, avec le même morceau qui traîne en plusieurs
+copies — parfois identiques, parfois juste ré-encodées, parfois carrément
+une autre version (remix, radio edit...) qu'il ne faut surtout pas
+confondre avec l'originale.
+
+**djlib** est un outil en ligne de commande qui :
+
+- **cataloge** chaque fichier audio de l'archive (métadonnées, format,
+  empreinte technique) ;
+- **résout** une identité propre pour chaque morceau (artiste, titre,
+  version, édition), même quand les tags sont absents ou incohérents ;
+- **détecte les doublons** — copies binaires identiques, mêmes morceaux
+  ré-encodés dans un autre format — sans jamais confondre deux versions
+  réellement distinctes du même titre ;
+- **propose**, pour chaque doublon confirmé, un fichier "préféré" (le
+  mieux encodé, le plus fiable) ;
+- **laisse l'humain trancher** dès qu'il y a la moindre ambiguïté, via un
+  rapport HTML consultable dans un navigateur.
+
+> [!IMPORTANT]
+> **djlib ne modifie jamais un fichier sous `music_root`.** Il ne
+> renomme rien, ne déplace rien, ne supprime rien, ne retague rien. Son
+> rôle s'arrête à l'analyse, à la proposition, et à la mémorisation des
+> décisions humaines — décider quoi faire *physiquement* d'un doublon reste
+> une action manuelle de l'opérateur.
+
+Ce projet cible en priorité un usage en **conteneur Proxmox LXC dédié**,
+avec l'archive source montée en lecture seule — mais il tourne tout aussi
+bien sur un poste de développement ou de test classique.
+
+## Comment ça fonctionne
+
+L'idée centrale : la base de données (`catalog.sqlite`) n'est qu'une **vue
+reconstructible** de ce qui existe réellement sur le disque, enrichie de
+l'historique des décisions humaines. Rien de ce qui compte n'est jamais
+perdu, puisque tout peut être reconstruit depuis l'archive source et un
+simple journal.
+
+```mermaid
+flowchart LR
+    MUSIC[("/music (lecture seule)")] -->|scan| CATALOG[(Catalogue SQLite)]
+    CATALOG -->|duplicates run| DETECT[Détection de doublons]
+    DETECT -->|duplicates report| REPORT[Rapport HTML]
+    REPORT --> HUMAN{{Revue humaine}}
+    HUMAN -->|import-decisions| CATALOG
+    CATALOG -.->|rebuild, si besoin| CATALOG
+```
+
+En pratique, un cycle d'utilisation ressemble à ceci :
+
+1. `djlib scan` parcourt l'archive et met à jour le catalogue ;
+2. `djlib duplicates run` détecte les doublons, calcule les preuves
+   nécessaires (hash, empreinte acoustique, qualité) et ne consolide
+   **automatiquement** que les cas sans ambiguïté ;
+3. `djlib duplicates report` génère une page HTML pour trancher les cas
+   ambigus à la main, dans un navigateur ;
+4. `djlib duplicates import-decisions` applique ces décisions, de façon
+   atomique et irréversible-par-erreur ;
+5. `djlib rebuild`, en cas d'incident sur la base, reconstruit tout depuis
+   l'archive et l'historique des décisions — sans rien redemander à
+   personne.
+
+Le fonctionnement détaillé (composants, modèle de données, cycles de vie)
+est expliqué dans **[`docs/architecture.md`](docs/architecture.md)**.
 
 ## Installation
 
-See `INSTALL.md` for full instructions. Short version:
+| | Conteneur Proxmox LXC (production) | Poste local (développement, test, ou tout autre usage) |
+| --- | --- | --- |
+| Isolation | `/music` physiquement en lecture seule | dépend de votre configuration |
+| Mise en route | une seule commande | `pip install` |
+| Recommandé pour | un usage réel, au long cours | contribuer, tester, explorer |
 
-- **Local install** (dev/testing): `python -m pip install -e '.[dev]'` plus
-  `exiftool`, `ffmpeg` and `libchromaprint-tools` on `PATH`.
-- **Proxmox LXC** (production, `/music` read-only + `/data` read/write): one
-  command on the Proxmox host provisions the container, installs every
-  requirement, installs djlib, writes the default config and migrates the
-  database -- ready to use. No clone needed, like the Proxmox community
-  scripts:
+**Conteneur Proxmox, en une commande** (sur l'hôte, en root) :
 
-  ```bash
-  CTID=200 MUSIC_SRC=/mnt/tank/djing DATA_SRC=/mnt/tank/djlib \
-    bash -c "$(curl -fsSL https://raw.githubusercontent.com/fmatsos/djlib/main/infra/lxc/create-container.sh)"
-  ```
+```bash
+CTID=200 MUSIC_SRC=/mnt/tank/djing DATA_SRC=/mnt/tank/djlib \
+  bash -c "$(curl -fsSL https://raw.githubusercontent.com/fmatsos/djlib/main/infra/lxc/create-container.sh)"
+```
 
-  The individual steps (`infra/lxc/configure-mounts.sh`,
-  `infra/lxc/bootstrap.sh`, `infra/lxc/install-djlib.sh`) are also usable on
-  their own -- see `INSTALL.md`.
+**Poste local :**
 
-## Development
+```bash
+python -m pip install -e '.[dev]'
+djlib --help
+```
+
+Le guide complet — installation manuelle étape par étape, mise à jour,
+exécution de `djlib rebuild` en tâche de fond, toutes les variables
+d'environnement — vit dans
+**[`docs/installation.md`](docs/installation.md)**.
+
+## Configuration
+
+djlib lit ses chemins depuis une section `[paths]` d'un fichier TOML (voir
+[`config.example.toml`](config.example.toml)), désigné par la variable
+d'environnement `DJLIB_CONFIG` :
+
+```bash
+DJLIB_CONFIG=/etc/djlib/config.toml djlib scan
+```
+
+Sans configuration fournie, les valeurs par défaut sont :
+
+```toml
+[paths]
+music_root = "/music"   # archive source, en lecture seule
+data_root  = "/data"    # état de djlib (catalog.sqlite, logs, etc.)
+```
+
+Une section `[duplicates]` (`duration`, `chromaprint`) permet d'ajuster la
+tolérance de durée et les seuils de classification Chromaprint — voir
+[`config.example.toml`](config.example.toml) pour chaque clé et sa valeur
+par défaut, et `djlib duplicates calibrate`
+([`docs/commandes.md`](docs/commandes.md#djlib-duplicates-calibrate)) pour
+les ajuster sur de vraies données.
+
+## Les commandes
+
+| Commande | Rôle en une phrase |
+| --- | --- |
+| `djlib doctor` | Bilan de santé complet de l'installation. |
+| `djlib scan` | Met à jour le catalogue depuis l'archive source. |
+| `djlib duplicates detect` | Repère les doublons candidats (métadonnées seules, pas cher). |
+| `djlib duplicates analyze` | Calcule les preuves et classe les candidats déjà détectés. |
+| `djlib duplicates run` | `detect` + `analyze` + consolidation automatique des cas sûrs. |
+| `djlib duplicates stats` | Compteurs par statut de groupe et par classification. |
+| `djlib duplicates calibrate` | Exporte les preuves pour ajuster les seuils à la main. |
+| `djlib duplicates report` | Génère le rapport HTML de revue humaine. |
+| `djlib duplicates import-decisions` | Applique les décisions exportées depuis le rapport. |
+| `djlib catalog stats` | Vue d'ensemble du catalogue. |
+| `djlib catalog inspect <id>` | Détail complet d'un fichier ou d'une track. |
+| `djlib runs show <run-id>` | Détail d'une exécution passée. |
+| `djlib rebuild` | Reconstruit le catalogue depuis l'archive et l'historique des décisions. |
+
+Le rôle exact et le fonctionnement de chacune sont détaillés dans
+**[`docs/commandes.md`](docs/commandes.md)**.
+
+## Aller plus loin
+
+- **[`docs/architecture.md`](docs/architecture.md)** — composants,
+  modèle de données, cycles de vie, garantie de reconstruction.
+- **[`docs/commandes.md`](docs/commandes.md)** — chaque commande en
+  détail, avec exemples.
+- **[`docs/installation.md`](docs/installation.md)** — installation
+  complète (Proxmox et poste local), variables d'environnement,
+  dépannage.
+- **[`docs/superpowers/`](docs/superpowers/)** — les documents de
+  conception d'origine, à destination des contributeurs (spécification
+  technique complète et plan d'implémentation historique).
+
+## Développement
 
 ```bash
 python -m pip install -e '.[dev]'
@@ -55,181 +178,12 @@ pytest
 djlib --help
 ```
 
-`tests/fixtures/build_audio_fixtures.py` generates a small, deterministic,
-synthetic-audio fixture library (`tests/fixtures/library/`, gitignored) used
-by `tests/integration/test_end_to_end.py` -- run it once before that test:
+`tests/fixtures/build_audio_fixtures.py` génère une petite bibliothèque
+audio synthétique, déterministe, gitignorée
+(`tests/fixtures/library/`), utilisée par
+`tests/integration/test_end_to_end.py` — à lancer une fois avant ce test :
 
 ```bash
 python tests/fixtures/build_audio_fixtures.py
 pytest
 ```
-
-## Configuration
-
-`djlib` reads paths from a `[paths]` section in a TOML file (see
-`config.example.toml`), pointed to via the `DJLIB_CONFIG` environment
-variable (e.g. `DJLIB_CONFIG=/etc/djlib/config.toml djlib scan`). Defaults,
-if no config file is given, are:
-
-```text
-music_root = /music   # read-only source archive
-data_root  = /data    # writable djlib state (catalog.sqlite, logs, etc.)
-```
-
-`[duplicates]` (`duration`, `chromaprint`) tunes candidate-blocking duration
-tolerance and Chromaprint classification thresholds -- see
-`config.example.toml` for every key and its default.
-
-## Environment variables
-
-### Runtime (`djlib` CLI)
-
-| Variable       | Role                                                                                    | Default              |
-| -------------- | ---------------------------------------------------------------------------------------- | -------------------- |
-| `DJLIB_CONFIG` | Path to a TOML config file (see `config.example.toml`) supplying `music_root`, `data_root` and `[duplicates]` thresholds. | unset -- `music_root=/music`, `data_root=/data` |
-| `DJLIB_REPO_ROOT` | Checkout containing `alembic.ini`/`alembic/`, used by `djlib doctor`'s migration check and `djlib rebuild` to run/inspect migrations. Only needed for a non-editable install (e.g. the LXC container, where `install-djlib.sh` sets it to `DJLIB_SRC_DIR`) -- an editable (`pip install -e`) dev install finds it on its own. | unset -- derived from this file's own location (works only for an editable install) |
-
-### `infra/lxc/create-container.sh` (provisions the LXC container)
-
-| Variable           | Role                                                                 | Default                                             |
-| ------------------ | --------------------------------------------------------------------- | ---------------------------------------------------- |
-| `CTID`              | LXC container ID to create or reuse.                                   | *(required)*                                         |
-| `HOSTNAME`          | Container hostname.                                                    | `djlib`                                              |
-| `STORAGE`           | Proxmox storage for the container rootfs.                              | `local-lvm`                                          |
-| `TEMPLATE_STORAGE`  | Storage holding the OS template.                                       | `local`                                              |
-| `TEMPLATE`          | OS template: a full volid (`local:vztmpl/debian-13-standard_...`) or just its filename/basename within `TEMPLATE_STORAGE`, with or without the archive extension. | highest-version `debian-<N>-standard` already downloaded (or, failing that, available) for this host's architecture |
-| `ARCH`              | Container architecture to match when auto-selecting a template.        | host arch (`dpkg --print-architecture`)              |
-| `ROOTFS_SIZE_GB`    | Rootfs size in GB.                                                     | `8`                                                   |
-| `MEMORY_MB`         | RAM in MB.                                                             | `2048`                                                |
-| `SWAP_MB`           | Swap in MB.                                                            | `512`                                                 |
-| `CORES`             | CPU cores.                                                             | `2`                                                   |
-| `BRIDGE`            | Network bridge.                                                        | `vmbr0`                                              |
-| `NET_CONFIG`        | Full `pct --net0` string (overrides `BRIDGE`).                         | `name=eth0,bridge=$BRIDGE,ip=dhcp`                   |
-| `MUSIC_SRC`         | Host path with the source DJ archive, mounted read-only as `/music`.   | `/mnt/tank/djing`                                    |
-| `DATA_SRC`          | Host path for djlib state, mounted read/write as `/data`.              | `/mnt/tank/djlib`                                    |
-| `DJLIB_REPO_URL`    | Git remote to install djlib from, inside the container.                | `https://github.com/fmatsos/djlib.git`               |
-| `DJLIB_REPO_REF`    | Git ref (branch/tag) to install, and to fetch this script's own sibling helpers from when run remotely. | `main`                          |
-| `DJLIB_RAW_BASE`    | Raw-content base URL used to fetch sibling helpers when run without a local clone. | `https://raw.githubusercontent.com/fmatsos/djlib` |
-
-### `infra/lxc/install-djlib.sh` (installs/updates djlib inside the container)
-
-| Variable            | Role                                                        | Default        |
-| -------------------- | ------------------------------------------------------------- | ---------------- |
-| `DJLIB_REPO_URL`     | Git remote to clone/fetch djlib from.                          | `https://github.com/fmatsos/djlib.git` |
-| `DJLIB_REPO_REF`     | Git ref (branch/tag) to install.                               | `main`          |
-| `DJLIB_SRC_DIR`      | Where djlib's source is checked out inside the container.      | `/opt/djlib`    |
-| `DJLIB_VENV`         | Python venv (created by `bootstrap.sh`) to install djlib into.  | `/opt/djlib-venv` |
-| `DJLIB_CONFIG_DIR`   | Directory for the default `config.toml`.                       | `/etc/djlib`    |
-| `DJLIB_DATA_ROOT`    | `/data` layout root (cache/curation/reports/decisions/logs).    | `/data`         |
-
-See `INSTALL.md` and each script's own header comment for full details and
-usage examples.
-
-## Operator workflow
-
-A typical session against a real DJ archive, in order:
-
-```bash
-djlib doctor
-```
-
-Health check: `/music` present (and, on a real read-only mount, physically
-read-only), `/data` writable, the SQLite schema is migrated, required
-executables (`exiftool`, `ffprobe`, `fpcalc`) are on `PATH`, BLAKE3 is
-importable, and a handful of internal catalogue invariants hold. Run this
-first, and again any time something looks wrong. `--repair-journal` exports
-any not-yet-exported curation events before reporting.
-
-```bash
-djlib scan
-```
-
-Incrementally walks `music_root`, extracting/resolving metadata for new or
-changed files and creating one `PROVISIONAL` track per new file. Re-running
-`scan` with nothing changed does no unnecessary work (0 new, 0 changed). A
-corrupt or unreadable individual file is recorded and counted, never aborts
-the scan.
-
-`scan`, `duplicates run` and `rebuild` show a live progress bar (current
-stage and count, e.g. `scanning 128/512`) instead of sitting silently --
-never a full file path, to keep the terminal readable on a large library.
-
-```bash
-djlib duplicates run
-djlib duplicates stats
-```
-
-`run` conservatively blocks duplicate candidates by metadata, computes
-targeted BLAKE3/Chromaprint/quality evidence only for those candidates,
-classifies each pair, and automatically consolidates only the groups every
-piece of evidence agrees on (`AUTO_CONFIRMED`: identical bytes or the same
-audio re-encoded losslessly). Anything genuinely ambiguous, or where
-metadata explicitly conflicts (e.g. "Original Mix" vs a remix/radio edit),
-is left `REVIEW_REQUIRED` for a human -- never silently merged. `stats`
-prints current group/pair counts by status and classification.
-
-```bash
-djlib duplicates calibrate
-```
-
-Before trusting automatic classification at library scale, export pairwise
-evidence for every blocked candidate (binary hash always; Chromaprint/
-similarity only when the hashes differ) and sample it by hand: exact binary
-duplicates as positive controls, explicit remix/edit/bootleg conflicts as
-negative controls, real same-version multi-encoding pairs as the case that
-actually matters. This command only reports -- it never writes a duplicate
-group or changes a threshold. If it surfaces false positives at the
-configured threshold, raise `[duplicates.chromaprint]` in your config and
-re-run `duplicates run`.
-
-```bash
-djlib duplicates report
-```
-
-Generates a static, serverless HTML review page under
-`/data/reports/duplicates-review-<timestamp>/` (`index.html` +
-`manifest.json`) listing every duplicate group with its evidence, reasons
-and a proposed preferred file. Open it in a browser, review each
-`REVIEW_REQUIRED` group, and export a `decisions.json` (CONFIRM /
-CHANGE_PREFERRED / REJECT / DEFER per group) from the page itself.
-
-```bash
-djlib duplicates import-decisions /data/decisions/decisions.json
-```
-
-Atomically applies a reviewed `decisions.json`: validated against the
-current catalogue state before a single row is written (stale or malformed
-input rejects the whole file, with no partial apply and no `--force`).
-CONFIRM/CHANGE_PREFERRED consolidate the group onto one track; REJECT/DEFER
-record the human decision without merging anything. Every accepted decision
-is durably exported to `/data/curation/events.jsonl` as part of the same
-step.
-
-```bash
-djlib catalog inspect <public-id>
-```
-
-Given a `fil_...` or `trk_...` public ID, shows raw/resolved metadata,
-effective identity (after any human override), any duplicate group the
-underlying file(s) belong to with its pairwise evidence and reasons, the
-preferred-file rationale, and the human decision provenance (curation
-events) behind the current state.
-
-```bash
-djlib rebuild
-```
-
-Rebuilds `catalog.sqlite` from `music_root` plus `/data/curation/events.jsonl`
-alone: backs up the current database (kept even on success), migrates a
-fresh one, does a full rescan, replays the curation journal, then re-runs
-`doctor`'s invariants. This is the concrete proof that catalogue loss is
-recoverable without re-reviewing anything a human already decided.
-
-### Out of scope: physical cleanup
-
-`djlib` never deletes, moves, or retags a single file under `music_root` --
-duplicate detection, preferred-file selection and every curation decision
-above are purely database-level bookkeeping (design's "read-only-over-source"
-invariant). Deciding what to actually do with a duplicate file on disk --
-delete it, archive it, replace it with the preferred copy -- is a manual,
-out-of-band step for the operator; `djlib` deliberately never automates it.
