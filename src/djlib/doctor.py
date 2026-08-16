@@ -13,6 +13,7 @@ import contextlib
 import importlib
 import os
 import shutil
+import sys
 import uuid
 from dataclasses import dataclass, field
 from enum import StrEnum
@@ -130,18 +131,35 @@ def check_sqlite_readable(session_maker: sessionmaker[Session]) -> CheckResult:
     return CheckResult('sqlite_readable', CheckStatus.PASS, 'SQLite is readable')
 
 
+REPO_ROOT_MARKER_NAME = '.djlib-repo-root'
+
+
 def _repo_root() -> Path:
     """Locates the checkout containing `alembic/`.
 
     `Path(__file__).resolve().parents[2]` only works for an editable/
     source-checkout install, where `__file__` still lives inside the real
     repo tree. A real (non-editable) install copies `doctor.py` into some
-    venv's `site-packages`, with no `alembic/` directory anywhere nearby --
-    `DJLIB_REPO_ROOT` (set by `infra/lxc/install-djlib.sh` to its checkout
-    directory) lets this find it there instead.
+    venv's `site-packages`, with no `alembic/` directory anywhere nearby.
+    Tried in order:
+
+    1. `DJLIB_REPO_ROOT` env var, an explicit override.
+    2. A `.djlib-repo-root` marker file at the venv root (`sys.prefix`),
+       written by `infra/lxc/install-djlib.sh` to the checkout it manages.
+       Unlike an env var, this is intrinsic to the running interpreter, so it
+       works no matter how djlib ends up invoked -- including an interactive
+       `pct enter` shell, which (being a non-login `lxc-attach` shell) never
+       sources `/etc/profile` and so never sees `DJLIB_REPO_ROOT` either,
+       even though `install-djlib.sh` did export it there.
+    3. The `parents[2]` guess (editable installs).
     """
     override = os.environ.get('DJLIB_REPO_ROOT')
-    return Path(override) if override else Path(__file__).resolve().parents[2]
+    if override:
+        return Path(override)
+    marker = Path(sys.prefix) / REPO_ROOT_MARKER_NAME
+    if marker.is_file():
+        return Path(marker.read_text(encoding='utf-8').strip())
+    return Path(__file__).resolve().parents[2]
 
 
 def _alembic_script_directory() -> ScriptDirectory:
