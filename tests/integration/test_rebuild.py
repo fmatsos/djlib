@@ -409,3 +409,30 @@ def test_rebuild_restores_preferred_file_for_a_fully_automatic_consolidation(
             assert preferred_after.relative_path == preferred_relative_path
     finally:
         rebuilt_engine.dispose()
+
+
+def test_rebuild_reports_progress_through_every_stage(
+    config: DjlibConfig, engine: Engine
+) -> None:
+    config.music_root.mkdir(parents=True)
+    engine.dispose()
+
+    calls: list[tuple[str, int, int]] = []
+    RebuildService(config).rebuild(
+        progress=lambda stage, current, total: calls.append((stage, current, total))
+    )
+
+    stages_in_order = []
+    for stage, _current, _total in calls:
+        if not stages_in_order or stages_in_order[-1] != stage:
+            stages_in_order.append(stage)
+    assert stages_in_order == [
+        'health check',
+        'backing up',
+        'migrating',
+        'scanning',
+        'replaying journal',
+        'checking invariants',
+    ]
+    assert calls[0] == ('health check', 0, 1)
+    assert calls[-1] == ('checking invariants', 1, 1)
