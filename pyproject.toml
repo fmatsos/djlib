@@ -26,5 +26,8 @@ djlib = "djlib.cli:app"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+"djlib.report" = ["decision-schema.json", "templates/*.j2", "assets/*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
