@@ -47,20 +47,38 @@ This is the target runtime: djlib never mutates the source archive, so it
 runs in a container where `/music` is physically mounted read-only and
 `/data` is the only writable state.
 
-### Automated: one script, ready to use
+### Automated, remote: one command, no clone needed
 
-Run on the Proxmox VE host as root:
+Like the Proxmox community scripts, this can be run straight from a `curl`,
+with nothing checked out on the host beforehand. On the Proxmox VE host, as
+root:
+
+```bash
+CTID=200 MUSIC_SRC=/mnt/tank/djing DATA_SRC=/mnt/tank/djlib \
+  bash -c "$(curl -fsSL https://raw.githubusercontent.com/fmatsos/djlib/main/infra/lxc/create-container.sh)"
+```
+
+`create-container.sh` fetches its sibling helpers (`configure-mounts.sh`,
+`bootstrap.sh`, `install-djlib.sh`) from GitHub itself when they aren't
+present next to it, so this one command is the entire install.
+
+### Automated, from a local clone
+
+If the repo is already checked out on the host, run the same script from
+its path instead -- it then uses the sibling scripts on disk and needs no
+network access to GitHub for itself (djlib's own source is still fetched by
+`install-djlib.sh` inside the container):
 
 ```bash
 CTID=200 MUSIC_SRC=/mnt/tank/djing DATA_SRC=/mnt/tank/djlib \
   ./infra/lxc/create-container.sh
 ```
 
-This creates the LXC container (or reuses `CTID` if it already exists),
-mounts `/music` (read-only) and `/data`, upgrades system packages, installs
-every system requirement, installs djlib into a dedicated venv, writes the
-default config to `/etc/djlib/config.toml`, migrates the database, and runs
-`djlib doctor`. When it finishes:
+Either way, this creates the LXC container (or reuses `CTID` if it already
+exists), mounts `/music` (read-only) and `/data`, upgrades system packages,
+installs every system requirement, installs djlib into a dedicated venv,
+writes the default config to `/etc/djlib/config.toml`, migrates the
+database, and runs `djlib doctor`. When it finishes:
 
 ```bash
 pct enter 200
