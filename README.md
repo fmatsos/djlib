@@ -35,11 +35,12 @@ See `INSTALL.md` for full instructions. Short version:
 - **Proxmox LXC** (production, `/music` read-only + `/data` read/write): one
   command on the Proxmox host provisions the container, installs every
   requirement, installs djlib, writes the default config and migrates the
-  database -- ready to use:
+  database -- ready to use. No clone needed, like the Proxmox community
+  scripts:
 
   ```bash
   CTID=200 MUSIC_SRC=/mnt/tank/djing DATA_SRC=/mnt/tank/djlib \
-    ./infra/lxc/create-container.sh
+    bash -c "$(curl -fsSL https://raw.githubusercontent.com/fmatsos/djlib/main/infra/lxc/create-container.sh)"
   ```
 
   The individual steps (`infra/lxc/configure-mounts.sh`,
