@@ -22,6 +22,12 @@ from djlib.scan.scanner import discover_audio_files
 SCANNER_VERSION = '1'
 MAX_ERROR_SUMMARY_PATHS = 20
 
+# Committing only once at the very end of a whole-library scan holds every
+# touched FileRecord/Track row (and their metadata blobs) live in the
+# session's identity map for the run's entire duration -- memory grows
+# unboundedly with library size. Committing in batches bounds it instead.
+_SCAN_COMMIT_BATCH_SIZE = 200
+
 
 def _now() -> dt.datetime:
     return dt.datetime.now(dt.UTC).replace(tzinfo=None)
@@ -138,6 +144,9 @@ class ScanService:
                         catalog_service.create_provisional_track(record)
                     else:
                         catalog_service.refresh_track_identity(track, record)
+
+                if index % _SCAN_COMMIT_BATCH_SIZE == 0:
+                    session.commit()
 
             for relative_path, record in existing.items():
                 if relative_path not in seen_paths:
