@@ -33,6 +33,14 @@ from djlib.progress import ProgressReporter, null_progress
 
 MATCHER_VERSION = '1'
 
+# analyze() computes BLAKE3/Chromaprint/ffmpeg-quality evidence per group and,
+# without this, only committed once for the entire run -- every new
+# DuplicatePairEvidence/FileQualityAnalysis row (each quality row carries a
+# sizeable astats/spectral `details_json` blob) stayed uncommitted, live in
+# the session's identity map, for the run's whole -- possibly hours-long --
+# duration. Committing every few groups bounds memory instead.
+_ANALYZE_COMMIT_BATCH_SIZE = 25
+
 # Group statuses an automatic re-analysis is still allowed to touch. CONFIRMED
 # / REJECTED / DEFERRED are human decisions (Task 13) and must never be
 # silently revisited or reversed by `duplicates analyze`/`duplicates run`
@@ -185,6 +193,8 @@ class DuplicateService:
         for index, group in enumerate(groups, start=1):
             progress('analyzing', index, total)
             self._analyze_group(group)
+            if index % _ANALYZE_COMMIT_BATCH_SIZE == 0:
+                self._session.commit()
         self._session.commit()
         return len(groups)
 
