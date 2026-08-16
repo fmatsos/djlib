@@ -97,7 +97,9 @@ existing container -- it does not recreate it.
 If you'd rather drive each step yourself (or the container already exists
 and was provisioned another way):
 
-1. Create the container (`pct create ...`) from a Debian 12 template.
+1. Create the container (`pct create ...`) from a Debian template (run
+   `pveam list <storage>` to see what's already downloaded, or
+   `pveam available --section system` to see what can be fetched).
 2. Mount the archive and state directories:
    ```bash
    ./infra/lxc/configure-mounts.sh <ctid>

@@ -22,9 +22,18 @@
 #   HOSTNAME         container hostname                 (default: djlib)
 #   STORAGE          storage for the container rootfs    (default: local-lvm)
 #   TEMPLATE_STORAGE storage holding the OS template      (default: local)
-#   TEMPLATE         full template volid, e.g.
-#                    local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst
-#                    (default: latest downloaded/available debian-12-standard)
+#   TEMPLATE         OS template to use. Either a full volid (e.g.
+#                    local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst) or
+#                    just its filename/basename within TEMPLATE_STORAGE (e.g.
+#                    debian-13-standard_13.1-2_amd64, with or without the
+#                    .tar.zst/.tar.gz/.tar.xz extension) -- run
+#                    `pveam list <TEMPLATE_STORAGE>` to see exact names.
+#                    (default: highest-version debian-<N>-standard already
+#                    downloaded into TEMPLATE_STORAGE for this host's
+#                    architecture, else the latest one available to download)
+#   ARCH             container architecture to match when auto-selecting a
+#                    template                            (default: host arch,
+#                    via `dpkg --print-architecture`)
 #   ROOTFS_SIZE_GB   rootfs size in GB                    (default: 8)
 #   MEMORY_MB        RAM in MB                            (default: 2048)
 #   SWAP_MB          swap in MB                           (default: 512)
@@ -64,6 +73,18 @@ DJLIB_REPO_URL="${DJLIB_REPO_URL:-https://github.com/fmatsos/djlib.git}"
 DJLIB_REPO_REF="${DJLIB_REPO_REF:-main}"
 DJLIB_RAW_BASE="${DJLIB_RAW_BASE:-https://raw.githubusercontent.com/fmatsos/djlib}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-}")" 2>/dev/null && pwd || true)"
+
+if [ -n "${ARCH:-}" ]; then
+  : # explicit override
+elif command -v dpkg >/dev/null 2>&1; then
+  ARCH="$(dpkg --print-architecture)"
+else
+  case "$(uname -m)" in
+    x86_64) ARCH=amd64 ;;
+    aarch64 | arm64) ARCH=arm64 ;;
+    *) ARCH="$(uname -m)" ;;
+  esac
+fi
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "error: run as root on the Proxmox VE host" >&2
@@ -108,14 +129,54 @@ if [ ! -d "$MUSIC_SRC" ]; then
 fi
 mkdir -p "$DATA_SRC"
 
-if [ -z "$TEMPLATE" ]; then
-  TEMPLATE="$(pveam list "$TEMPLATE_STORAGE" 2>/dev/null | awk '/debian-12-standard/{print $1}' | sort -V | tail -n1)"
+# Resolves a user-supplied TEMPLATE (bare filename/basename, with or without
+# the storage prefix and/or archive extension) to the full volid pct create
+# needs. Passes an already-qualified volid ("storage:vztmpl/...") through
+# unchanged.
+resolve_template() {
+  local requested="$1" match
+  case "$requested" in
+    *:*)
+      printf '%s\n' "$requested"
+      return
+      ;;
+  esac
+  match="$(pveam list "$TEMPLATE_STORAGE" 2>/dev/null | awk -v want="$requested" '
+    {
+      volid = $1
+      n = split(volid, parts, "/")
+      fname = parts[n]
+      base = fname
+      sub(/\.tar\.(zst|gz|xz)$/, "", base)
+      if (fname == want || base == want) print volid
+    }' | sort -V | tail -n1)"
+  if [ -n "$match" ]; then
+    printf '%s\n' "$match"
+    return
+  fi
+  echo "error: template '$requested' not found in storage '$TEMPLATE_STORAGE'." >&2
+  echo "Available templates in '$TEMPLATE_STORAGE':" >&2
+  pveam list "$TEMPLATE_STORAGE" >&2 || true
+  echo "Set TEMPLATE to one of the names above (with or without the" >&2
+  echo "storage:vztmpl/ prefix and archive extension), or leave it unset" >&2
+  echo "to auto-select a debian-standard template for arch '$ARCH'." >&2
+  exit 1
+}
+
+if [ -n "$TEMPLATE" ]; then
+  TEMPLATE="$(resolve_template "$TEMPLATE")"
+else
+  TEMPLATE="$(pveam list "$TEMPLATE_STORAGE" 2>/dev/null | awk -v arch="$ARCH" \
+    '$1 ~ /vztmpl\/debian-[0-9][0-9]*-standard_/ && index($1, "_" arch ".") > 0 {print $1}' \
+    | sort -V | tail -n1)"
 fi
 if [ -z "$TEMPLATE" ]; then
   pveam update
-  LATEST="$(pveam available --section system 2>/dev/null | awk '/debian-12-standard/{print $2}' | sort -V | tail -n1)"
+  LATEST="$(pveam available --section system 2>/dev/null | awk -v arch="$ARCH" \
+    '$0 ~ /debian-[0-9][0-9]*-standard_/ && index($0, "_" arch ".") > 0 {print $2}' \
+    | sort -V | tail -n1)"
   [ -n "$LATEST" ] || {
-    echo "error: no debian-12-standard template available -- set TEMPLATE explicitly" >&2
+    echo "error: no debian-standard template available for arch '$ARCH' -- set TEMPLATE explicitly" >&2
     exit 1
   }
   pveam download "$TEMPLATE_STORAGE" "$LATEST"
