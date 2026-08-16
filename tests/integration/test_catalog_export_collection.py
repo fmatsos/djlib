@@ -1,9 +1,11 @@
 import wave
 from pathlib import Path
 
-from sqlalchemy import Engine, select
+import pytest
+from sqlalchemy import Engine, event, select
 from sqlalchemy.orm import Session
 
+from djlib.catalog import export as catalog_export
 from djlib.catalog.export import collect_catalog_export_rows
 from djlib.catalog.service import CatalogService
 from djlib.catalog.queries import active_track_for_file
@@ -55,6 +57,50 @@ def test_collect_catalog_export_rows_matches_effective_identity_and_technical_fi
             assert row.duration_ms == file.duration_ms
             assert row.is_present == file.is_present
             assert row.quality_score is None
+
+
+def test_collecting_rows_streams_files_instead_of_loading_the_whole_catalogue_up_front(
+    config: DjlibConfig, engine: Engine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exporting the whole catalogue must not load every `FileRecord` (each
+    carrying a `raw_metadata_json` blob) into memory before producing the
+    first output row -- that holds the entire library resident for the
+    whole export, when only one file at a time is ever needed."""
+    config.music_root.mkdir(parents=True)
+    for index in range(5):
+        _write_valid_wav(config.music_root / f'Artist - Track {index}.wav')
+
+    monkeypatch.setattr(catalog_export, '_EXPORT_YIELD_PER', 1)
+
+    session_maker = session_factory(engine)
+    ScanService(config, session_maker).scan()
+
+    loaded_count = 0
+
+    def _count_loads(target: FileRecord, context: object) -> None:
+        nonlocal loaded_count
+        loaded_count += 1
+
+    event.listen(FileRecord, 'load', _count_loads)
+    try:
+        loaded_before_first_row: list[int] = []
+        original = catalog_export._latest_quality_score
+
+        def _spy(session: Session, file_id: int) -> float | None:
+            loaded_before_first_row.append(loaded_count)
+            return original(session, file_id)
+
+        monkeypatch.setattr(catalog_export, '_latest_quality_score', _spy)
+
+        with session_maker() as session:
+            rows = collect_catalog_export_rows(session)
+    finally:
+        event.remove(FileRecord, 'load', _count_loads)
+
+    assert len(rows) == 5
+    # Only the first file should have been loaded by the time the first
+    # row's data was gathered -- not all five.
+    assert loaded_before_first_row[0] == 1
 
 
 def test_rows_are_ordered_by_relative_path(config: DjlibConfig, engine: Engine) -> None:

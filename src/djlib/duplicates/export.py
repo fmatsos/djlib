@@ -51,10 +51,17 @@ class DuplicateExportRow:
     reasons: str
 
 
+_EXPORT_YIELD_PER = 200
+
+
 def collect_duplicate_export_rows(session: Session) -> list[DuplicateExportRow]:
-    groups = list(
-        session.execute(select(DuplicateGroup).order_by(DuplicateGroup.id)).scalars()
-    )
+    """Streams `DuplicateGroup`s in batches rather than loading them all up
+    front -- see `catalog/export.py::collect_catalog_export_rows` for why an
+    unbatched query holds the whole result set resident until the export
+    finishes."""
+    groups = session.execute(
+        select(DuplicateGroup).order_by(DuplicateGroup.id).execution_options(yield_per=_EXPORT_YIELD_PER)
+    ).scalars()
 
     rows: list[DuplicateExportRow] = []
     for group in groups:
