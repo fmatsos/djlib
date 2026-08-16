@@ -80,6 +80,49 @@ data_root  = /data    # writable djlib state (catalog.sqlite, logs, etc.)
 tolerance and Chromaprint classification thresholds -- see
 `config.example.toml` for every key and its default.
 
+## Environment variables
+
+### Runtime (`djlib` CLI)
+
+| Variable       | Role                                                                                    | Default              |
+| -------------- | ---------------------------------------------------------------------------------------- | -------------------- |
+| `DJLIB_CONFIG` | Path to a TOML config file (see `config.example.toml`) supplying `music_root`, `data_root` and `[duplicates]` thresholds. | unset -- `music_root=/music`, `data_root=/data` |
+
+### `infra/lxc/create-container.sh` (provisions the LXC container)
+
+| Variable           | Role                                                                 | Default                                             |
+| ------------------ | --------------------------------------------------------------------- | ---------------------------------------------------- |
+| `CTID`              | LXC container ID to create or reuse.                                   | *(required)*                                         |
+| `HOSTNAME`          | Container hostname.                                                    | `djlib`                                              |
+| `STORAGE`           | Proxmox storage for the container rootfs.                              | `local-lvm`                                          |
+| `TEMPLATE_STORAGE`  | Storage holding the OS template.                                       | `local`                                              |
+| `TEMPLATE`          | Full template volid to use, e.g. `local:vztmpl/debian-12-standard_...`. | latest downloaded/available `debian-12-standard`     |
+| `ROOTFS_SIZE_GB`    | Rootfs size in GB.                                                     | `8`                                                   |
+| `MEMORY_MB`         | RAM in MB.                                                             | `2048`                                                |
+| `SWAP_MB`           | Swap in MB.                                                            | `512`                                                 |
+| `CORES`             | CPU cores.                                                             | `2`                                                   |
+| `BRIDGE`            | Network bridge.                                                        | `vmbr0`                                              |
+| `NET_CONFIG`        | Full `pct --net0` string (overrides `BRIDGE`).                         | `name=eth0,bridge=$BRIDGE,ip=dhcp`                   |
+| `MUSIC_SRC`         | Host path with the source DJ archive, mounted read-only as `/music`.   | `/mnt/tank/djing`                                    |
+| `DATA_SRC`          | Host path for djlib state, mounted read/write as `/data`.              | `/mnt/tank/djlib`                                    |
+| `DJLIB_REPO_URL`    | Git remote to install djlib from, inside the container.                | `https://github.com/fmatsos/djlib.git`               |
+| `DJLIB_REPO_REF`    | Git ref (branch/tag) to install, and to fetch this script's own sibling helpers from when run remotely. | `main`                          |
+| `DJLIB_RAW_BASE`    | Raw-content base URL used to fetch sibling helpers when run without a local clone. | `https://raw.githubusercontent.com/fmatsos/djlib` |
+
+### `infra/lxc/install-djlib.sh` (installs/updates djlib inside the container)
+
+| Variable            | Role                                                        | Default        |
+| -------------------- | ------------------------------------------------------------- | ---------------- |
+| `DJLIB_REPO_URL`     | Git remote to clone/fetch djlib from.                          | `https://github.com/fmatsos/djlib.git` |
+| `DJLIB_REPO_REF`     | Git ref (branch/tag) to install.                               | `main`          |
+| `DJLIB_SRC_DIR`      | Where djlib's source is checked out inside the container.      | `/opt/djlib`    |
+| `DJLIB_VENV`         | Python venv (created by `bootstrap.sh`) to install djlib into.  | `/opt/djlib-venv` |
+| `DJLIB_CONFIG_DIR`   | Directory for the default `config.toml`.                       | `/etc/djlib`    |
+| `DJLIB_DATA_ROOT`    | `/data` layout root (cache/curation/reports/decisions/logs).    | `/data`         |
+
+See `INSTALL.md` and each script's own header comment for full details and
+usage examples.
+
 ## Operator workflow
 
 A typical session against a real DJ archive, in order:
