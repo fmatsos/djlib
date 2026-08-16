@@ -30,6 +30,7 @@ from djlib.curation.replay import CurationReplay
 from djlib.db.engine import create_engine_for_config
 from djlib.db.session import session_factory
 from djlib.doctor import CheckStatus, Doctor, _repo_root, check_music_root_exists
+from djlib.progress import ProgressReporter, null_progress
 from djlib.scan.service import ScanService, ScanSummary
 
 
@@ -50,21 +51,33 @@ class RebuildService:
     def __init__(self, config: DjlibConfig) -> None:
         self._config = config
 
-    def rebuild(self) -> RebuildSummary:
+    def rebuild(self, progress: ProgressReporter = null_progress) -> RebuildSummary:
+        progress('health check', 0, 1)
         self._health_check_music_root()
+        progress('health check', 1, 1)
+
+        progress('backing up', 0, 1)
         backup_path = self._backup_database()
+        progress('backing up', 1, 1)
+
+        progress('migrating', 0, 1)
         self._recreate_database()
+        progress('migrating', 1, 1)
 
         engine = create_engine_for_config(self._config)
         try:
             session_maker = session_factory(engine)
-            scan_summary = ScanService(self._config, session_maker).scan(full=True)
+            scan_summary = ScanService(self._config, session_maker).scan(full=True, progress=progress)
 
             events_path = self._config.data_root / 'curation' / 'events.jsonl'
+            progress('replaying journal', 0, 1)
             with session_maker() as session:
                 replay_summary = CurationReplay(self._config, session).replay(events_path)
+            progress('replaying journal', 1, 1)
 
+            progress('checking invariants', 0, 1)
             report = Doctor(self._config, session_maker).run()
+            progress('checking invariants', 1, 1)
         finally:
             engine.dispose()
 

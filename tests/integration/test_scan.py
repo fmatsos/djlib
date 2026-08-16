@@ -71,3 +71,17 @@ def test_new_unchanged_changed_missing_lifecycle(config: DjlibConfig, engine: En
     assert _file_record(session_maker, 'track.mp3').is_present is False
 
     assert new_run.public_id != unchanged_run.public_id != changed_run.public_id != missing_run.public_id
+
+
+def test_scan_reports_progress_per_discovered_file(config: DjlibConfig, engine: Engine) -> None:
+    config.music_root.mkdir(parents=True)
+    _write_valid_wav(config.music_root / 'a.mp3', num_frames=5)
+    _write_valid_wav(config.music_root / 'b.mp3', num_frames=5)
+
+    session_maker = session_factory(engine)
+    service = ScanService(config, session_maker)
+
+    calls: list[tuple[str, int, int]] = []
+    service.scan(progress=lambda stage, current, total: calls.append((stage, current, total)))
+
+    assert calls == [('scanning', 0, 2), ('scanning', 1, 2), ('scanning', 2, 2)]
