@@ -176,6 +176,31 @@ def test_migrations_current_check_passes_after_real_alembic_upgrade(tmp_path: Pa
     real_engine.dispose()
 
 
+def _fake_repo_with_only_revision_0001(parent_dir: Path) -> Path:
+    """A trimmed alembic tree carrying only revision 0001 (the real tree's
+    head is 0002), so that silently falling back to the real repo root is
+    distinguishable from honouring an override that points here.
+    """
+    fake_repo = parent_dir / 'fake-repo'
+    fake_versions_dir = fake_repo / 'alembic' / 'versions'
+    fake_versions_dir.mkdir(parents=True)
+    shutil.copy2(
+        REPO_ROOT / 'alembic' / 'versions' / '0001_initial_catalog.py',
+        fake_versions_dir / '0001_initial_catalog.py',
+    )
+    return fake_repo
+
+
+def _bare_sqlite_engine_stamped_at(version: str) -> Engine:
+    engine = create_engine('sqlite:///:memory:', future=True)
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            'CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)'
+        )
+        connection.exec_driver_sql(f"INSERT INTO alembic_version VALUES ('{version}')")
+    return engine
+
+
 def test_migrations_current_check_honours_djlib_repo_root_override(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -185,30 +210,51 @@ def test_migrations_current_check_honours_djlib_repo_root_override(
     nearby -- deriving the repo root from `Path(__file__).resolve().parents[N]`
     then points at a path that doesn't exist. `DJLIB_REPO_ROOT` must let it
     look elsewhere instead.
-
-    Uses a copy of only revision 0001 (the real tree's heads are {'0002'}) so
-    that ignoring the override -- falling back to the real, `__file__`-derived
-    repo root -- is distinguishable from honouring it.
     """
-    fake_repo = tmp_path / 'fake-repo'
-    fake_versions_dir = fake_repo / 'alembic' / 'versions'
-    fake_versions_dir.mkdir(parents=True)
-    real_versions_dir = REPO_ROOT / 'alembic' / 'versions'
-    shutil.copy2(
-        real_versions_dir / '0001_initial_catalog.py',
-        fake_versions_dir / '0001_initial_catalog.py',
-    )
+    fake_repo = _fake_repo_with_only_revision_0001(tmp_path)
     monkeypatch.setenv('DJLIB_REPO_ROOT', str(fake_repo))
 
-    bare_engine = create_engine('sqlite:///:memory:', future=True)
-    with bare_engine.begin() as connection:
-        connection.exec_driver_sql(
-            'CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)'
-        )
-        connection.exec_driver_sql("INSERT INTO alembic_version VALUES ('0001')")
-
+    bare_engine = _bare_sqlite_engine_stamped_at('0001')
     result = doctor.check_migrations_current(session_factory(bare_engine))
+    assert result.status == CheckStatus.PASS
+    bare_engine.dispose()
 
+
+def test_migrations_current_check_honours_repo_root_marker_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`install-djlib.sh` also writes a `.djlib-repo-root` marker file at the
+    venv root (`sys.prefix`) -- the mechanism that actually survives a
+    `pct enter` session, which (being a non-login `lxc-attach` shell) never
+    sources `/etc/profile.d` and so never sees `DJLIB_REPO_ROOT`, even though
+    `install-djlib.sh` exported it there too.
+    """
+    fake_repo = _fake_repo_with_only_revision_0001(tmp_path)
+    fake_venv = tmp_path / 'fake-venv'
+    fake_venv.mkdir()
+    (fake_venv / doctor.REPO_ROOT_MARKER_NAME).write_text(str(fake_repo), encoding='utf-8')
+    monkeypatch.delenv('DJLIB_REPO_ROOT', raising=False)
+    monkeypatch.setattr(sys, 'prefix', str(fake_venv))
+
+    bare_engine = _bare_sqlite_engine_stamped_at('0001')
+    result = doctor.check_migrations_current(session_factory(bare_engine))
+    assert result.status == CheckStatus.PASS
+    bare_engine.dispose()
+
+
+def test_migrations_current_check_prefers_env_override_over_marker_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`DJLIB_REPO_ROOT`, when set, wins over the marker file."""
+    fake_venv = tmp_path / 'fake-venv'
+    fake_venv.mkdir()
+    marker_repo = _fake_repo_with_only_revision_0001(tmp_path / 'via-marker')
+    (fake_venv / doctor.REPO_ROOT_MARKER_NAME).write_text(str(marker_repo), encoding='utf-8')
+    monkeypatch.setattr(sys, 'prefix', str(fake_venv))
+    monkeypatch.setenv('DJLIB_REPO_ROOT', str(REPO_ROOT))
+
+    bare_engine = _bare_sqlite_engine_stamped_at('0002')
+    result = doctor.check_migrations_current(session_factory(bare_engine))
     assert result.status == CheckStatus.PASS
     bare_engine.dispose()
 
