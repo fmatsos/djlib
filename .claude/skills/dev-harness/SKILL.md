@@ -1,6 +1,7 @@
 ---
 name: dev-harness
-description: Use when the user asks to implement, build, fix, or add something in this codebase and wants the implement-review-fix loop handled by dedicated agents instead of driven turn-by-turn in the main conversation — phrases like "implement X", "build this feature", "have an agent do this and review it", "use the dev harness", "run this through the agents". Explains the four dev agents (impl-scoped, impl-quick, impl-reviewer, dev-orchestrator), how to pick between them, how to launch them correctly with the Agent tool, and how to stay in control of the run instead of just firing and forgetting.
+description: Coordinates the implement-review-fix loop for development tasks in this repo through four dedicated agents (impl-scoped, impl-quick, impl-reviewer, dev-orchestrator) — how to pick between them, launch them, and stay in control of the run.
+when_to_use: Use when the user asks to implement, build, fix, or add something in this codebase and wants the implement-review-fix loop handled by dedicated agents instead of driven turn-by-turn in the main conversation. Trigger phrases: "implement X", "build this feature", "have an agent do this and review it", "use the dev harness", "run this through the agents", "spawn an agent to fix this and get it reviewed".
 ---
 
 # Dev harness: implement -> review -> fix, via dedicated agents

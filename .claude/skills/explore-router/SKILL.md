@@ -1,6 +1,7 @@
 ---
 name: explore-router
-description: Use when deciding how to search the codebase for a "find X", "where is Y defined", "which files reference Z", or "how does W work" question — whether to just search directly, use the built-in Explore agent, or delegate to this project's explore-precise / explore-broad agents. Chooses the right option by how well-defined the target is and how much ground needs covering, so a one-line lookup doesn't spin up a broad search and a genuinely open question doesn't get a search too narrow to find most of the answer.
+description: Chooses between searching inline, the built-in Explore agent, or this project's explore-precise / explore-broad agents for a codebase search question, based on how well-defined the target is.
+when_to_use: Use when deciding how to search the codebase for a "find X", "where is Y defined", "which files reference Z", or "how does W work" question — so a one-line lookup doesn't spin up a broad search and a genuinely open question doesn't get a search too narrow to find most of the answer. Trigger phrases: "find where X is defined", "which files call Y", "how does Z work", "search the codebase for...", or any point before spawning a search agent in this repo.
 ---
 
 # Exploration routing: precise vs broad vs "just search it yourself"
