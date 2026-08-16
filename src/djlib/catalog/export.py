@@ -91,13 +91,24 @@ def _latest_quality_score(session: Session, file_id: int) -> float | None:
     return row.quality_score if row is not None else None
 
 
+_EXPORT_YIELD_PER = 200
+
+
 def collect_catalog_export_rows(session: Session) -> list[CatalogExportRow]:
+    """Streams `FileRecord`s in batches rather than materializing the whole
+    catalogue up front -- with each row carrying a `raw_metadata_json` blob,
+    a plain unbatched query loads every file before producing the first
+    output row, holding the entire library resident in memory for the whole
+    export. `execution_options(yield_per=...)` makes SQLAlchemy fetch (and
+    instantiate) rows in bounded chunks instead."""
     catalog_service = CatalogService(session)
-    files = list(
-        session.execute(select(FileRecord).order_by(FileRecord.relative_path)).scalars()
-    )
 
     rows: list[CatalogExportRow] = []
+    files = session.execute(
+        select(FileRecord)
+        .order_by(FileRecord.relative_path)
+        .execution_options(yield_per=_EXPORT_YIELD_PER)
+    ).scalars()
     for file in files:
         track = active_track_for_file(session, file.id)
         if track is not None:
