@@ -48,10 +48,13 @@ to the orchestrator):
   `PreferredChoice.reasons`. Rather than re-invoking `QualityAnalyzer`
   (which would call ffmpeg and insert new `FileQualityAnalysis` rows --
   exactly the DB write and filesystem access this module must not do), the
-  generator reconstructs each file's latest persisted `FileQualityAnalysis`
-  row into a `QualityResult` (mirroring `quality.py`'s own private
+  generator delegates to `duplicates/rationale.py::preferred_choice_from_persisted`,
+  which reconstructs each file's latest persisted `FileQualityAnalysis` row
+  into a `QualityResult` (mirroring `quality.py`'s own private
   `_cached_result` helper) and replays `PreferredFileSelector.choose()`
-  against already-stored evidence only.
+  against already-stored evidence only -- shared with `cli.py`'s `catalog
+  inspect` and `duplicates/export.py`'s flat export, the same logic all three
+  read-only callers need.
 """
 
 import datetime as dt
@@ -67,7 +70,6 @@ from sqlalchemy.orm import Session
 from djlib.catalog.queries import active_track_for_file
 from djlib.catalog.service import CatalogService, EffectiveIdentity
 from djlib.config import DjlibConfig
-from djlib.db.enums import PairClassification
 from djlib.db.models import (
     AppState,
     DuplicateGroup,
@@ -77,19 +79,13 @@ from djlib.db.models import (
     FileRecord,
     ScanRun,
 )
-from djlib.duplicates.preferred import PreferredCandidate, PreferredChoice, PreferredFileSelector
-from djlib.duplicates.quality import QualityResult
+from djlib.duplicates.preferred import PreferredChoice
+from djlib.duplicates.rationale import group_reasons, preferred_choice_from_persisted
 from djlib.ids import new_public_id
 
 _TEMPLATE_DIR = Path(__file__).parent / 'templates'
 _ASSETS_DIR = Path(__file__).parent / 'assets'
 _METADATA_FIELDS = ('title_raw', 'artist_raw', 'album_raw', 'genre_raw', 'bpm_raw', 'key_raw')
-
-# design §16 (`DuplicateGroupBuilder._draft`), mirrored read-only for display
-# rather than re-run: a group's own status already IS the classification
-# outcome, but a human reviewer also needs the *rationale* for that status,
-# which was never itself persisted as a column on `DuplicateGroup`.
-_INCONSISTENT = frozenset({PairClassification.DIFFERENT, PairClassification.CONFLICT})
 
 
 @dataclass(frozen=True)
@@ -142,26 +138,6 @@ def _metadata_completeness(file: FileRecord) -> float:
     return filled / len(_METADATA_FIELDS)
 
 
-def _quality_result_from_row(row: FileQualityAnalysis) -> QualityResult:
-    """Reconstructs a `QualityResult` from an already-persisted
-    `FileQualityAnalysis` row -- mirrors `duplicates/quality.py`'s private
-    `_cached_result` helper, kept as a small separate copy here rather than
-    importing a private function across modules or widening `quality.py`'s
-    public surface for a use case outside this task's scope.
-    """
-    details = row.details_json or {}
-    return QualityResult(
-        integrity_ok=row.integrity_status == 'OK',
-        lossless=row.lossless_status == 'LOSSLESS',
-        transcode_suspicion=row.transcode_suspicion,
-        clipping_detected=row.clipping_status == 'CLIPPED',
-        audio_quality_score=details.get('audio_quality_score', 0.0),
-        metadata_completeness=details.get('metadata_completeness', 0.0),
-        quality_score=row.quality_score if row.quality_score is not None else 0.0,
-        details=details,
-    )
-
-
 def _quality_dict(row: FileQualityAnalysis | None) -> dict | None:
     if row is None:
         return None
@@ -185,23 +161,6 @@ def _identity_dict(identity: EffectiveIdentity) -> dict:
             {'name': fa.name, 'source': fa.source} for fa in identity.featured_artists
         ],
     }
-
-
-def _group_reasons(pair_rows: list[DuplicatePairEvidence]) -> list[str]:
-    classifications = {row.classification for row in pair_rows}
-    if classifications & _INCONSISTENT:
-        return [
-            'conflicting or contradictory pairwise evidence within this group '
-            '(design §16: never rely on naive transitive closure)'
-        ]
-    if PairClassification.PROBABLE in classifications:
-        return [
-            'at least one PROBABLE pair -- plausible but not confident enough '
-            'for automatic consolidation'
-        ]
-    if classifications:
-        return ['every pairwise classification in this group is EXACT or AUDIO_EQUIVALENT']
-    return ['no pairwise evidence available (fewer than two analyzed files)']
 
 
 class ReportGenerator:
@@ -325,7 +284,7 @@ class ReportGenerator:
             'resolved_at': group.resolved_at.isoformat() if group.resolved_at else None,
             'proposed_preferred_file_id': proposed_preferred_public_id,
             'proposed_preferred_reasons': list(preferred_choice.reasons) if preferred_choice else [],
-            'reasons': _group_reasons(pair_rows),
+            'reasons': group_reasons(pair_rows),
             'file_count': len(file_entries),
             'quality_delta': quality_delta,
             'sort_path': min((f.relative_path for f in files.values()), default=''),
@@ -334,15 +293,7 @@ class ReportGenerator:
         }
 
     def _propose_preferred_choice(self, files: list[FileRecord]) -> PreferredChoice | None:
-        candidates: list[PreferredCandidate] = []
-        for file in files:
-            row = self._latest_quality_row(file.id)
-            if row is None:
-                continue
-            candidates.append(PreferredCandidate(file_id=file.id, quality=_quality_result_from_row(row)))
-        if not candidates:
-            return None
-        return PreferredFileSelector().choose(candidates)
+        return preferred_choice_from_persisted(self._session, files)
 
     def _latest_quality_row(self, file_id: int) -> FileQualityAnalysis | None:
         return self._session.execute(

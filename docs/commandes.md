@@ -141,6 +141,20 @@ djlib duplicates calibrate                    # CSV sur stdout
 djlib duplicates calibrate --json --output evidence.json
 ```
 
+## `djlib duplicates export`
+
+**Rôle :** exporte les groupes de doublons sous forme de données plates —
+une ligne par groupe (statut, confiance, fichiers membres, fichier préféré
+proposé, raisons de classement). À ne pas confondre avec `djlib duplicates
+report` : pas de page interactive, pas de manifeste, pas de workflow de
+décision — juste un instantané exportable de l'état courant des groupes.
+
+```bash
+djlib duplicates export                         # CSV sur stdout
+djlib duplicates export --format html           # page HTML autonome
+djlib duplicates export --output duplicates.csv
+```
+
 ## `djlib duplicates report`
 
 **Rôle :** génère une page HTML **statique et autonome** (pas de serveur,
@@ -186,6 +200,19 @@ présents / absents), tracks par statut, historique des scans.
 djlib catalog stats
 ```
 
+## `djlib catalog export`
+
+**Rôle :** exporte le catalogue complet — une ligne par fichier, avec
+l'identité effective de sa track (artiste/titre/version/édition,
+artistes en featuring), ses métadonnées techniques et le dernier score de
+qualité connu (s'il a déjà été calculé par `duplicates analyze`).
+
+```bash
+djlib catalog export                     # CSV sur stdout
+djlib catalog export --format html       # page HTML autonome, triable/filtrable
+djlib catalog export --output catalog.csv
+```
+
 ## `djlib catalog inspect <public-id>`
 
 **Rôle :** la commande d'investigation. Donnez un identifiant `fil_...`
@@ -197,6 +224,21 @@ humaines** qui ont mené à l'état actuel.
 
 ```bash
 djlib catalog inspect trk_8f2c1a90b6
+```
+
+---
+
+## `djlib stats export`
+
+**Rôle :** exporte, en une seule table plate (catégorie / métrique /
+valeur), les mêmes compteurs que `catalog stats` et `duplicates stats`
+affichent séparément sur le terminal — fichiers, tracks par statut, scans,
+groupes de doublons par statut, paires par classification.
+
+```bash
+djlib stats export                    # CSV sur stdout
+djlib stats export --format html
+djlib stats export --output stats.csv
 ```
 
 ---
