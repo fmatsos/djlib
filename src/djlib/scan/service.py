@@ -13,6 +13,7 @@ from djlib.db.models import FileFeaturedArtist, FileRecord, ScanRun
 from djlib.ids import new_public_id
 from djlib.metadata.extractor import MetadataExtractor, ensure_required_executables
 from djlib.metadata.types import ExtractedMetadata, MetadataExtractionError
+from djlib.progress import ProgressReporter, null_progress
 from djlib.resolve.normalizer import normalize_identity
 from djlib.resolve.resolver import MetadataResolver
 from djlib.resolve.types import RawIdentity
@@ -50,12 +51,14 @@ class ScanService:
         self._metadata_extractor = metadata_extractor or MetadataExtractor.create()
         self._resolver = MetadataResolver()
 
-    def scan(self, full: bool = False) -> ScanSummary:
+    def scan(self, full: bool = False, progress: ProgressReporter = null_progress) -> ScanSummary:
         ensure_required_executables()
 
         discovered = list(discover_audio_files(self._config.music_root))
         seen_paths = {item.relative_path for item in discovered}
         now = _now()
+        total = len(discovered)
+        progress('scanning', 0, total)
 
         files_new = files_changed = files_unchanged = files_missing = files_failed = 0
         failed_paths: list[str] = []
@@ -68,7 +71,8 @@ class ScanService:
 
             catalog_service = CatalogService(session)
 
-            for item in discovered:
+            for index, item in enumerate(discovered, start=1):
+                progress('scanning', index, total)
                 record = existing.get(item.relative_path)
                 is_new = record is None
                 needs_extraction: bool

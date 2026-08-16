@@ -150,6 +150,10 @@ changed files and creating one `PROVISIONAL` track per new file. Re-running
 corrupt or unreadable individual file is recorded and counted, never aborts
 the scan.
 
+`scan`, `duplicates run` and `rebuild` show a live progress bar (current
+stage and count, e.g. `scanning 128/512`) instead of sitting silently --
+never a full file path, to keep the terminal readable on a large library.
+
 ```bash
 djlib duplicates run
 djlib duplicates stats

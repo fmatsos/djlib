@@ -29,6 +29,7 @@ from djlib.duplicates.similarity import metadata_similarity
 from djlib.duplicates.types import TrackIdentitySnapshot
 from djlib.ids import new_public_id
 from djlib.metadata.types import CommandRunner, SubprocessCommandRunner
+from djlib.progress import ProgressReporter, null_progress
 
 MATCHER_VERSION = '1'
 
@@ -93,7 +94,7 @@ class DuplicateService:
 
     # -- detect --------------------------------------------------------
 
-    def detect(self) -> int:
+    def detect(self, progress: ProgressReporter = null_progress) -> int:
         """Blocking-only candidate detection (design §14). No BLAKE3, no
         Chromaprint, no quality analysis -- `duplicate_groups` rows are
         persisted at `DETECTED` status with no evidence computed yet.
@@ -103,7 +104,7 @@ class DuplicateService:
                 select(FileRecord.id).where(FileRecord.is_present.is_(True))
             ).scalars()
         )
-        raw_pairs = self._collect_candidate_pairs(present_file_ids)
+        raw_pairs = self._collect_candidate_pairs(present_file_ids, progress)
         components = connected_components(list(raw_pairs))
 
         groups: list[DuplicateGroup] = []
@@ -116,10 +117,14 @@ class DuplicateService:
         self._session.commit()
         return len(groups)
 
-    def _collect_candidate_pairs(self, file_ids: list[int]) -> set[tuple[int, int]]:
+    def _collect_candidate_pairs(
+        self, file_ids: list[int], progress: ProgressReporter = null_progress
+    ) -> set[tuple[int, int]]:
         blocker = CandidateBlocker(self._session, self._config.duplicates.duration)
         pairs: set[tuple[int, int]] = set()
-        for file_id in file_ids:
+        total = len(file_ids)
+        for index, file_id in enumerate(file_ids, start=1):
+            progress('detecting', index, total)
             for candidate in blocker.find_candidates(file_id):
                 pairs.add(
                     (
@@ -166,7 +171,7 @@ class DuplicateService:
 
     # -- analyze ---------------------------------------------------------
 
-    def analyze(self) -> int:
+    def analyze(self, progress: ProgressReporter = null_progress) -> int:
         """Targeted evidence + classification for already-detected groups
         (design §17-21). Never touches `CONFIRMED`/`REJECTED`/`DEFERRED`
         groups -- those are human decisions.
@@ -176,7 +181,9 @@ class DuplicateService:
                 select(DuplicateGroup).where(DuplicateGroup.status.in_(_ANALYZABLE_STATUSES))
             ).scalars()
         )
-        for group in groups:
+        total = len(groups)
+        for index, group in enumerate(groups, start=1):
+            progress('analyzing', index, total)
             self._analyze_group(group)
         self._session.commit()
         return len(groups)
@@ -301,17 +308,17 @@ class DuplicateService:
 
     # -- run: detect + analyze + safe automatic consolidation -------------
 
-    def run(self) -> DuplicateRunSummary:
-        groups_detected = self.detect()
-        groups_analyzed = self.analyze()
-        groups_consolidated = self._consolidate_auto_confirmed_groups()
+    def run(self, progress: ProgressReporter = null_progress) -> DuplicateRunSummary:
+        groups_detected = self.detect(progress)
+        groups_analyzed = self.analyze(progress)
+        groups_consolidated = self._consolidate_auto_confirmed_groups(progress)
         return DuplicateRunSummary(
             groups_detected=groups_detected,
             groups_analyzed=groups_analyzed,
             groups_consolidated=groups_consolidated,
         )
 
-    def _consolidate_auto_confirmed_groups(self) -> int:
+    def _consolidate_auto_confirmed_groups(self, progress: ProgressReporter = null_progress) -> int:
         groups = list(
             self._session.execute(
                 select(DuplicateGroup).where(
@@ -319,8 +326,10 @@ class DuplicateService:
                 )
             ).scalars()
         )
+        total = len(groups)
         consolidated = 0
-        for group in groups:
+        for index, group in enumerate(groups, start=1):
+            progress('consolidating', index, total)
             if group.proposed_preferred_file_id is None:
                 continue
             if self.consolidate_group(
