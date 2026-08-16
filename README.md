@@ -96,7 +96,8 @@ tolerance and Chromaprint classification thresholds -- see
 | `HOSTNAME`          | Container hostname.                                                    | `djlib`                                              |
 | `STORAGE`           | Proxmox storage for the container rootfs.                              | `local-lvm`                                          |
 | `TEMPLATE_STORAGE`  | Storage holding the OS template.                                       | `local`                                              |
-| `TEMPLATE`          | Full template volid to use, e.g. `local:vztmpl/debian-12-standard_...`. | latest downloaded/available `debian-12-standard`     |
+| `TEMPLATE`          | OS template: a full volid (`local:vztmpl/debian-13-standard_...`) or just its filename/basename within `TEMPLATE_STORAGE`, with or without the archive extension. | highest-version `debian-<N>-standard` already downloaded (or, failing that, available) for this host's architecture |
+| `ARCH`              | Container architecture to match when auto-selecting a template.        | host arch (`dpkg --print-architecture`)              |
 | `ROOTFS_SIZE_GB`    | Rootfs size in GB.                                                     | `8`                                                   |
 | `MEMORY_MB`         | RAM in MB.                                                             | `2048`                                                |
 | `SWAP_MB`           | Swap in MB.                                                            | `512`                                                 |
