@@ -29,10 +29,8 @@ from djlib.curation.replay import ReplaySummary
 from djlib.curation.replay import CurationReplay
 from djlib.db.engine import create_engine_for_config
 from djlib.db.session import session_factory
-from djlib.doctor import CheckStatus, Doctor, check_music_root_exists
+from djlib.doctor import CheckStatus, Doctor, _repo_root, check_music_root_exists
 from djlib.scan.service import ScanService, ScanSummary
-
-_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 class RebuildError(Exception):
@@ -126,7 +124,7 @@ class RebuildService:
         try:
             subprocess.run(
                 [sys.executable, '-m', 'alembic', 'upgrade', 'head'],
-                cwd=_REPO_ROOT,
+                cwd=_repo_root(),
                 env={**os.environ, 'DJLIB_CONFIG': str(alembic_config_path)},
                 check=True,
                 capture_output=True,
