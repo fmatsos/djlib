@@ -46,8 +46,10 @@ ln -sf "$VENV/bin/djlib" /usr/local/bin/djlib
 
 cat > /etc/profile.d/djlib.sh <<EOF
 export DJLIB_CONFIG="$CONFIG_DIR/config.toml"
+export DJLIB_REPO_ROOT="$SRC_DIR"
 EOF
 
 export DJLIB_CONFIG="$CONFIG_DIR/config.toml"
+export DJLIB_REPO_ROOT="$SRC_DIR"
 "$VENV/bin/alembic" -c "$SRC_DIR/alembic.ini" upgrade head
 "$VENV/bin/djlib" doctor

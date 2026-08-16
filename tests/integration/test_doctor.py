@@ -1,6 +1,7 @@
 import importlib
 import os
 import pathlib
+import shutil
 import subprocess
 import sys
 import uuid
@@ -173,6 +174,43 @@ def test_migrations_current_check_passes_after_real_alembic_upgrade(tmp_path: Pa
     result = doctor.check_migrations_current(session_factory(real_engine))
     assert result.status == CheckStatus.PASS
     real_engine.dispose()
+
+
+def test_migrations_current_check_honours_djlib_repo_root_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-editable install (e.g. `pip install /opt/djlib` into
+    `/opt/djlib-venv`, as `infra/lxc/install-djlib.sh` does) puts `doctor.py`
+    under the venv's `site-packages`, with no `alembic/` directory anywhere
+    nearby -- deriving the repo root from `Path(__file__).resolve().parents[N]`
+    then points at a path that doesn't exist. `DJLIB_REPO_ROOT` must let it
+    look elsewhere instead.
+
+    Uses a copy of only revision 0001 (the real tree's heads are {'0002'}) so
+    that ignoring the override -- falling back to the real, `__file__`-derived
+    repo root -- is distinguishable from honouring it.
+    """
+    fake_repo = tmp_path / 'fake-repo'
+    fake_versions_dir = fake_repo / 'alembic' / 'versions'
+    fake_versions_dir.mkdir(parents=True)
+    real_versions_dir = REPO_ROOT / 'alembic' / 'versions'
+    shutil.copy2(
+        real_versions_dir / '0001_initial_catalog.py',
+        fake_versions_dir / '0001_initial_catalog.py',
+    )
+    monkeypatch.setenv('DJLIB_REPO_ROOT', str(fake_repo))
+
+    bare_engine = create_engine('sqlite:///:memory:', future=True)
+    with bare_engine.begin() as connection:
+        connection.exec_driver_sql(
+            'CREATE TABLE alembic_version (version_num VARCHAR(32) NOT NULL)'
+        )
+        connection.exec_driver_sql("INSERT INTO alembic_version VALUES ('0001')")
+
+    result = doctor.check_migrations_current(session_factory(bare_engine))
+
+    assert result.status == CheckStatus.PASS
+    bare_engine.dispose()
 
 
 def test_doctor_run_reports_failures_gracefully_on_completely_missing_schema(

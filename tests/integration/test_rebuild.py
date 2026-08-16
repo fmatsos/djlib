@@ -8,9 +8,11 @@ test -- every fixture file's hash is verified unchanged before and after.
 
 import datetime as dt
 import json
+import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
 from blake3 import blake3
 from sqlalchemy import Engine, create_engine, select
 from sqlalchemy.orm import sessionmaker, Session
@@ -43,6 +45,9 @@ def _make_noise_wav(path: Path, seed: int, duration: float = 3.0) -> None:
 
 def _reencode(src: Path, dst: Path, *codec_args: str) -> None:
     subprocess.run(['ffmpeg', '-y', '-v', 'error', '-i', str(src), *codec_args, str(dst)], check=True)
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def _now_iso() -> str:
@@ -130,6 +135,50 @@ def _curated_projection(
             'dup_survivor_status': dup_survivor_track.status.value,
             'dup_survivor_preferred_relative_path': dup_survivor_preferred_relative_path,
         }
+
+
+def test_recreate_database_honours_djlib_repo_root_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`_recreate_database` runs `alembic upgrade head` with this repo's
+    checkout as `cwd` (via the same `djlib.doctor._repo_root()` used by
+    `check_migrations_current`, see test_doctor.py's
+    `test_migrations_current_check_honours_djlib_repo_root_override`): a real
+    (non-editable) install has no working `alembic.ini`/`alembic/` directory
+    anywhere near the installed package, so `DJLIB_REPO_ROOT` must let it run
+    the migration from an arbitrary checkout elsewhere instead.
+
+    The fake repo only carries revision 0001 (the real tree's head is
+    0002), so that falling back to the real, `__file__`-derived repo root --
+    i.e. ignoring the override -- is distinguishable from honouring it.
+    """
+    fake_repo = tmp_path / 'fake-repo'
+    fake_versions_dir = fake_repo / 'alembic' / 'versions'
+    fake_versions_dir.mkdir(parents=True)
+    shutil.copy2(REPO_ROOT / 'alembic' / 'env.py', fake_repo / 'alembic' / 'env.py')
+    shutil.copy2(
+        REPO_ROOT / 'alembic' / 'script.py.mako', fake_repo / 'alembic' / 'script.py.mako'
+    )
+    shutil.copy2(
+        REPO_ROOT / 'alembic' / 'versions' / '0001_initial_catalog.py',
+        fake_versions_dir / '0001_initial_catalog.py',
+    )
+    shutil.copy2(REPO_ROOT / 'alembic.ini', fake_repo / 'alembic.ini')
+    monkeypatch.setenv('DJLIB_REPO_ROOT', str(fake_repo))
+
+    music_root = tmp_path / 'music'
+    music_root.mkdir()
+    config = DjlibConfig(music_root=music_root, data_root=tmp_path / 'data')
+
+    RebuildService(config)._recreate_database()
+
+    engine = create_engine(config.database_url, future=True)
+    with engine.connect() as connection:
+        version = connection.exec_driver_sql(
+            'SELECT version_num FROM alembic_version'
+        ).scalar_one()
+    engine.dispose()
+    assert version == '0001'
 
 
 def test_rebuild_reconstructs_the_curated_projection_exactly(
