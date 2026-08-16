@@ -87,6 +87,7 @@ tolerance and Chromaprint classification thresholds -- see
 | Variable       | Role                                                                                    | Default              |
 | -------------- | ---------------------------------------------------------------------------------------- | -------------------- |
 | `DJLIB_CONFIG` | Path to a TOML config file (see `config.example.toml`) supplying `music_root`, `data_root` and `[duplicates]` thresholds. | unset -- `music_root=/music`, `data_root=/data` |
+| `DJLIB_REPO_ROOT` | Checkout containing `alembic.ini`/`alembic/`, used by `djlib doctor`'s migration check and `djlib rebuild` to run/inspect migrations. Only needed for a non-editable install (e.g. the LXC container, where `install-djlib.sh` sets it to `DJLIB_SRC_DIR`) -- an editable (`pip install -e`) dev install finds it on its own. | unset -- derived from this file's own location (works only for an editable install) |
 
 ### `infra/lxc/create-container.sh` (provisions the LXC container)
 

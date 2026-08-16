@@ -11,6 +11,7 @@ can't be made to fail import for real.
 
 import contextlib
 import importlib
+import os
 import shutil
 import uuid
 from dataclasses import dataclass, field
@@ -129,9 +130,22 @@ def check_sqlite_readable(session_maker: sessionmaker[Session]) -> CheckResult:
     return CheckResult('sqlite_readable', CheckStatus.PASS, 'SQLite is readable')
 
 
+def _repo_root() -> Path:
+    """Locates the checkout containing `alembic/`.
+
+    `Path(__file__).resolve().parents[2]` only works for an editable/
+    source-checkout install, where `__file__` still lives inside the real
+    repo tree. A real (non-editable) install copies `doctor.py` into some
+    venv's `site-packages`, with no `alembic/` directory anywhere nearby --
+    `DJLIB_REPO_ROOT` (set by `infra/lxc/install-djlib.sh` to its checkout
+    directory) lets this find it there instead.
+    """
+    override = os.environ.get('DJLIB_REPO_ROOT')
+    return Path(override) if override else Path(__file__).resolve().parents[2]
+
+
 def _alembic_script_directory() -> ScriptDirectory:
-    repo_root = Path(__file__).resolve().parents[2]
-    return ScriptDirectory(str(repo_root / 'alembic'))
+    return ScriptDirectory(str(_repo_root() / 'alembic'))
 
 
 def check_migrations_current(session_maker: sessionmaker[Session]) -> CheckResult:
